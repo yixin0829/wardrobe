@@ -541,11 +541,8 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
           {garmentArtwork}
         </div>
           <div className="viewer-heading modeled-caption">
-            <div>
-              <h2>{draft.name || TYPE_MAP[draft.part]?.singular}</h2>
-            </div>
+            <PhotoActions title={draft.name || TYPE_MAP[draft.part]?.singular} collection={photoCollection} photo={activePhoto} disabled={pending || isDirty || activePhoto?.image !== loadedPhotoImage} disabledReason={isDirty ? "Save your item changes before rating or regenerating a photo." : activePhoto && activePhoto.image !== loadedPhotoImage ? "Loading photo…" : ""} />
           </div>
-          <div className="viewer-photo-actions"><PhotoActions collection={photoCollection} photo={activePhoto} disabled={pending || isDirty || activePhoto?.image !== loadedPhotoImage} disabledReason={isDirty ? "Save your item changes before rating or regenerating a photo." : activePhoto && activePhoto.image !== loadedPhotoImage ? "Loading photo…" : ""} /></div>
         </>
       ) : (
         <>

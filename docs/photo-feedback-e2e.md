@@ -31,6 +31,22 @@ The touch check found that the shared button style reduced Regenerate to 36 px. 
 
 ## Screenshots
 
+### Compact title-row update
+
+Option 1 is the implemented design for both modeled previews and complete outfits. The three borderless icons are 15 px and sit beside the title. Desktop click areas measure 28 × 30 px; touch areas remain 44 × 44 px with the same small visible glyphs. Permanent explanatory copy and the separate action row are removed. Undo appears temporarily as an unboxed link and countdown; screen-reader status messages remain available without announcing every countdown tick.
+
+The updated real UI was checked with the isolated provider: feedback and comments persisted, regeneration completed, Undo restored the preceding version with all three test versions retained, and outfit controls shared the title row. The 390 px touch viewport had no horizontal overflow or console errors. All 38 tests and the production build passed.
+
+![Compact preview title-row controls](screenshots/photo-actions-title-row.png)
+
+![Compact complete-outfit controls](screenshots/photo-actions-title-row-outfit.png)
+
+![Temporary compact Undo link](screenshots/photo-actions-title-row-undo.png)
+
+![Small glyphs with touch-size targets](screenshots/photo-actions-title-row-mobile.png)
+
+### Original feature verification
+
 Screenshots were inspected. Desktop captures are cropped to the relevant popup or side panel for readability; mobile captures show the full 390 px viewport. All displayed content is anonymous fixture content.
 
 ![Feedback popup with a comment](screenshots/photo-feedback-popup.png)

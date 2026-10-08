@@ -6,24 +6,27 @@
 .prompt-calibration-control { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 11px; }
 .prompt-calibration-control button { min-height: 34px; border: 0; padding: 5px 0; background: none; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .prompt-calibration-control p { width: 100%; margin: 0; color: var(--accent); }
-.viewer-photo-actions { flex: 0 0 auto; padding: 0 34px 20px; }
-.photo-actions { min-width: 0; }
-.photo-actions__row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.photo-actions__ratings { display: flex; gap: 6px; }
-.photo-actions__ratings button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
-.photo-actions__ratings button.is-selected { background: rgba(25, 25, 25, .06); border-color: var(--ink); color: var(--ink); }
-.photo-actions__ratings button:not(:disabled):hover { color: var(--ink); border-color: var(--ink); }
-.photo-actions .photo-actions__regenerate { min-height: 44px; }
+.photo-actions { width: 100%; min-width: 0; }
+.photo-actions__heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.photo-actions__title { min-width: 0; margin: 0; font-size: 18px; font-weight: 520; line-height: 1.3; letter-spacing: -.015em; overflow-wrap: anywhere; }
+.photo-actions__tools { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.photo-actions__tools button { display: grid; place-items: center; width: 28px; height: 30px; border: 0; border-radius: 4px; padding: 0; background: transparent; color: #8b8379; cursor: pointer; }
+.photo-actions__tools button.is-selected { color: var(--ink); }
+.photo-actions__separator { width: 1px; height: 13px; margin: 0 4px; background: var(--line); }
+.photo-actions__tools button.photo-actions__regenerate { margin-left: 5px; }
+.photo-actions__tools button:not(:disabled):active { transform: scale(.97); }
+.photo-actions__regenerate.is-generating svg { animation: photo-actions-spin 900ms linear infinite; }
+@keyframes photo-actions-spin { to { transform: rotate(360deg); } }
 .photo-actions button:disabled,
 .photo-dialog button:disabled,
 .prompt-calibration-control button:disabled { opacity: .5; cursor: default; }
 .photo-actions button:focus-visible,
 .photo-dialog button:focus-visible,
 .prompt-calibration-control button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.photo-actions__note { margin: 9px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.photo-actions__status { margin: 9px 0 0; font-size: 12px; line-height: 1.5; }
-.photo-actions__undo { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 0; border: 1px solid var(--line); padding: 7px 10px; background: rgba(255, 255, 255, .3); font-size: 11px; line-height: 1.5; }
-.photo-actions__undo button { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; min-width: 44px; border: 0; padding: 4px 0; background: transparent; color: var(--accent); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.photo-actions__announcement { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.photo-actions__undo { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 4px; font-size: 11px; }
+.photo-actions__undo button { display: inline-flex; align-items: center; gap: 5px; min-height: 23px; border: 0; padding: 3px 0; background: transparent; color: var(--accent); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.photo-actions__countdown { color: #938a7f; font-size: 10px; font-variant-numeric: tabular-nums; }
 .photo-actions__error { margin: 10px 0 0; color: var(--accent); font-size: 12px; line-height: 1.5; }
 .photo-actions__error p { margin: 0; }
 .photo-actions__error button { min-height: 34px; border: 0; padding: 5px 0; background: transparent; color: var(--accent); text-decoration: underline; cursor: pointer; }
@@ -50,12 +53,25 @@
 .outfit-viewer .viewer-icon-close { top: 20px; right: 20px; background: rgba(244, 240, 232, .88); }
 .outfit-viewer__image { flex: 0 0 auto; display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
 .outfit-viewer__details { padding: 24px 30px 36px; }
-.outfit-viewer__details h2 { margin: 0 0 12px; font-size: 20px; line-height: 1.3; font-weight: 520; letter-spacing: -.015em; }
+.outfit-viewer__details .photo-actions__title { font-size: 20px; }
+.outfit-viewer .photo-actions { margin-bottom: 12px; }
 .outfit-viewer__reason { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .outfit-viewer__occasion { margin: 0 0 20px; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.outfit-viewer .photo-actions { margin-top: 20px; }
+@media (hover: hover) and (pointer: fine) {
+  .photo-actions__tools button:not(:disabled):hover { color: var(--ink); background: rgba(223, 216, 204, .45); }
+  .photo-actions__undo button:not(:disabled):hover { text-decoration: underline; text-underline-offset: 3px; }
+}
+@media (hover: none), (pointer: coarse) {
+  .photo-actions__tools button { width: 44px; height: 44px; }
+  .photo-actions__tools button.photo-actions__regenerate { margin-left: 0; }
+  .photo-actions__separator { margin-inline: 1px; }
+  .photo-actions__undo button { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .photo-actions__regenerate.is-generating svg { animation: none; }
+  .photo-actions__tools button:not(:disabled):active { transform: none; }
+}
 @media (max-width: 1180px) {
-  .viewer-photo-actions { padding-inline: 30px; }
   .outfit-collection-heading { padding-inline: 34px; }
   .outfit-grid { padding-inline: 34px; }
 }
@@ -68,7 +84,7 @@
   .collection-toolbar { gap: 10px; margin-bottom: 22px; }
   .collection-nav { gap: 22px; }
   .collection-nav button { font-size: 18px; }
-  .viewer-photo-actions { padding: 0 22px 20px; }
+  .photo-actions__heading { gap: 8px; }
   .photo-dialog__content { padding: 20px; }
   .photo-dialog__field textarea { font-size: 16px; }
   .outfit-collection-heading { padding-inline: 18px; }

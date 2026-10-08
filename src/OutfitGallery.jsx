@@ -30,10 +30,9 @@ function OutfitViewer({ outfit, onClose, onPhotoChange }) {
           <button type="button" className="viewer-icon-close" aria-label="Close outfit viewer" onClick={onClose} ref={closeRef}><X size={24} weight="light" aria-hidden="true" /></button>
           <OptimizedImage className="outfit-viewer__image" src={image} alt={outfit.name || "Styled outfit"} sizes="(max-width: 860px) 100vw, 520px" breakpoints={[320, 480, 640, 800, 1040]} priority onLoad={() => setLoadedImage(image)} />
           <div className="outfit-viewer__details">
-            <h2>{outfit.name || "Styled outfit"}</h2>
+            <PhotoActions title={outfit.name || "Styled outfit"} collection={collection} photo={photo} disabled={photo?.image !== loadedImage} disabledReason={photo && photo.image !== loadedImage ? "Loading photo…" : ""} />
             {outfit.reason && <p className="outfit-viewer__reason">{outfit.reason}</p>}
             {!!outfit.occasion?.length && <p className="outfit-viewer__occasion">{Array.isArray(outfit.occasion) ? outfit.occasion.join(" · ") : outfit.occasion}</p>}
-            <PhotoActions collection={collection} photo={photo} disabled={photo?.image !== loadedImage} disabledReason={photo && photo.image !== loadedImage ? "Loading photo…" : ""} />
           </div>
         </aside>
       </div>

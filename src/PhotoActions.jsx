@@ -115,7 +115,7 @@ function PhotoDialog({ title, busy, onClose, children }) {
   );
 }
 
-export function PhotoActions({ collection, photo, disabled = false, disabledReason = "" }) {
+export function PhotoActions({ title, collection, photo, disabled = false, disabledReason = "" }) {
   const [dialog, setDialog] = useState(null);
   const [rating, setRating] = useState("up");
   const [comment, setComment] = useState("");
@@ -170,19 +170,21 @@ export function PhotoActions({ collection, photo, disabled = false, disabledReas
 
   return (
     <section className="photo-actions" aria-label="Photo feedback and regeneration">
-      <div className="photo-actions__row">
-        <div className="photo-actions__ratings" role="group" aria-label="Rate this photo">
-          <button type="button" className={photo?.feedback?.rating === "up" ? "is-selected" : ""} disabled={!available || busy} onClick={() => openFeedback("up")} aria-label="Like this photo" aria-pressed={photo?.feedback?.rating === "up"} title="Like this photo"><ThumbsUp size={19} weight={photo?.feedback?.rating === "up" ? "fill" : "regular"} aria-hidden="true" /></button>
-          <button type="button" className={photo?.feedback?.rating === "down" ? "is-selected" : ""} disabled={!available || busy} onClick={() => openFeedback("down")} aria-label="Dislike this photo" aria-pressed={photo?.feedback?.rating === "down"} title="Dislike this photo"><ThumbsDown size={19} weight={photo?.feedback?.rating === "down" ? "fill" : "regular"} aria-hidden="true" /></button>
+      <div className="photo-actions__heading">
+        <h2 className="photo-actions__title">{title}</h2>
+        <div className="photo-actions__tools" role="group" aria-label="Photo actions">
+          <button type="button" className={photo?.feedback?.rating === "up" ? "is-selected" : ""} disabled={!available || busy} onClick={() => openFeedback("up")} aria-label="Like this photo" aria-pressed={photo?.feedback?.rating === "up"} title={disabledReason || "Like this photo"}><ThumbsUp size={15} weight={photo?.feedback?.rating === "up" ? "fill" : "regular"} aria-hidden="true" /></button>
+          <button type="button" className={photo?.feedback?.rating === "down" ? "is-selected" : ""} disabled={!available || busy} onClick={() => openFeedback("down")} aria-label="Dislike this photo" aria-pressed={photo?.feedback?.rating === "down"} title={disabledReason || "Dislike this photo"}><ThumbsDown size={15} weight={photo?.feedback?.rating === "down" ? "fill" : "regular"} aria-hidden="true" /></button>
+          <span className="photo-actions__separator" aria-hidden="true" />
+          <button type="button" className={`photo-actions__regenerate${photo?.generating ? " is-generating" : ""}`} disabled={!available || busy} onClick={openRegeneration} aria-label={photo?.generating ? "Creating photo" : "Regenerate photo"} title={disabledReason || (photo?.generating ? "Creating photo…" : "Regenerate photo")}><ArrowClockwise size={15} aria-hidden="true" /></button>
         </div>
-        <button type="button" className="secondary-button photo-actions__regenerate" disabled={!available || busy} onClick={openRegeneration}><ArrowClockwise size={16} aria-hidden="true" />{photo?.generating ? "Creating photo…" : "Regenerate"}</button>
       </div>
-      {remaining > 0 && !photo?.generating && <div className="photo-actions__undo" role="status">
-        <span>New photo ready. Undo available for {remaining}s.</span>
-        <button type="button" disabled={busy} onClick={undo}><ArrowCounterClockwise size={15} aria-hidden="true" /> Undo</button>
+      {remaining > 0 && !photo?.generating && <div className="photo-actions__undo">
+        <button type="button" disabled={busy} onClick={undo} aria-label="Undo photo regeneration" title="Restore the previous photo"><ArrowCounterClockwise size={13} aria-hidden="true" /> Undo</button>
+        <span className="photo-actions__countdown" aria-hidden="true">{remaining}s</span>
+        <span className="photo-actions__announcement" role="status">New photo ready. Undo is available for one minute.</span>
       </div>}
-      <p className="photo-actions__note">{disabledReason || (photo?.generating ? "Your current photo stays here while the new one is created." : "Photos and feedback are saved for future styling improvements.")}</p>
-      {savedNotice && <p className="photo-actions__status" role="status">{savedNotice}</p>}
+      {savedNotice && <p className="photo-actions__announcement" role="status">{savedNotice}</p>}
       {(collection.error || photo?.error) && <div className="photo-actions__error" role="alert"><p>{collection.error || photo.error}</p>{collection.error && <button type="button" disabled={collection.pending} onClick={collection.refresh}>Try again</button>}</div>}
       {dialog && <PhotoDialog title={dialog.type === "feedback" ? (rating === "up" ? "What works well?" : "What could be better?") : "Create a new photo"} busy={collection.pending} onClose={() => setDialog(null)}>
         <form onSubmit={submit}>
