@@ -54,7 +54,7 @@ Use `rg --files` first. Include JPEG, PNG, WebP, HEIC/HEIF, TIFF, BMP, and AVIF.
 
 Create upright RGB JPEG working copies at quality 95 or better without upscaling. Make labeled contact sheets of at most 12 photos and inspect every sheet. Inventory every deliberately worn top, jacket, bottom, accessory, and pair of shoes.
 
-Read `data/library.json` before generating: consolidate confirmed physical duplicates with existing items and honor their saved shirt/layer choices. Reuse the existing accepted cutout for a confirmed existing item so its content-derived ID remains unchanged. A shirt stays one `upperbody` item in Tops even when it also works as a layer.
+Read `data/library.json` before generating: consolidate confirmed physical duplicates with existing items and honor their saved layer suitability. Reuse the existing accepted cutout for a confirmed existing item so its content-derived ID remains unchanged. Keep the original category and one physical item ID even when an item also works as a layer.
 
 ### 2. Build the manifest
 
@@ -67,12 +67,11 @@ Write `$WORK/manifest.json` using this final shape:
       "slug": "navy-flannel-shirt",
       "file": "navy-flannel-shirt.png",
       "modeledFiles": [
-        { "mode": "top", "file": "navy-flannel-shirt-top.png" },
+        { "mode": "default", "file": "navy-flannel-shirt.png" },
         { "mode": "layer", "file": "navy-flannel-shirt-layer.png" }
       ],
       "name": "Navy Flannel Shirt",
       "part": "upperbody",
-      "isShirt": true,
       "canLayer": true,
       "layeringSource": "ai",
       "color": "#172033",
@@ -96,13 +95,11 @@ Use only these `part` values:
 
 Use lowercase hyphenated slugs, six-digit hex colors, at most 12 short lowercase tags, and `null` when there is no genuinely distinct secondary color. Keep working records as `status: "generate"` or `status: "hold"`; change a record to `accepted` only after final QA. The import script ignores every non-accepted record.
 
-Classify every item from visible construction:
+Infer `canLayer` independently of category from the visible construction, weight and fit: can this piece serve as a visible outer layer over another garment in a plausible outfit? Casual flannels, textured shirts, roomy overshirts and zip-up jackets can qualify. Pullovers can qualify when their fit supports an inner piece; keep their real closed construction. Fitted formal dress shirts, ordinary bottoms, shoes and uncertain cases usually do not qualify. Do not equate layer suitability with a front opening, or require a shirt classification.
 
-- `isShirt: true` means an `upperbody` shirt with a full front opening; tees, polos and pullovers are false.
-- `canLayer: true` means a shirt whose full opening, weight and fit support wearing it open over another top: casual flannel shirts, overshirts and roomy casual button-front shirts qualify. Dress shirts and uncertain cases default to false.
-- Set both fields false for other items and `layeringSource: "ai"` for new judgments. A saved `layeringSource: "manual"` choice takes precedence over an AI reclassification; carry it into the working manifest before selecting modeled modes.
+Set `layeringSource: "ai"` for new judgments. A saved `layeringSource: "manual"` choice takes precedence over an AI reclassification; carry it into the working manifest before selecting modeled modes.
 
-Use `modeledFiles` for new modeled output: exactly `top` and `layer` for a layerable shirt, exactly `top` for a non-layerable shirt, and exactly `default` for every other piece. The legacy `modeledFile` input remains supported for older single-photo manifests. All filenames are local PNG basenames.
+Use `modeledFiles` for new modeled output: exactly `default` and `layer` when `canLayer` is true, and exactly `default` otherwise. The legacy `modeledFile` input remains supported for older single-photo manifests. All filenames are local PNG basenames.
 
 ### 3. Prepare focused references
 
@@ -153,13 +150,12 @@ Use `data/model-reference.png` as the identity reference unless `WARDROBE_MODEL_
 
 For every accepted cutout, use Imagegen with the face identity first, any applicable body references next, then the exact garment PNG. Name the reference roles explicitly in the prompt. Save horizontal 3:2 PNGs in `$WORK/modeled/` and list them in `modeledFiles`:
 
-- Layerable shirt: exactly two photos, `SLUG-top.png` worn closed/buttoned as the top and `SLUG-layer.png` worn unbuttoned over one visible understated inner top using its actual front opening.
-- Other shirt: one `SLUG-top.png` worn buttoned as a top.
-- Every other piece: one `SLUG.png` in `default` mode.
+- Layerable piece: exactly two photos, `SLUG.png` in its normal featured-item presentation (`default`) and `SLUG-layer.png` worn as a visible outer layer over an appropriate inner piece (`layer`). A button-front shirt can be buttoned in its default view and open in the layer view; a zip-up jacket can be closed and open. Use only real closures and keep pullovers closed.
+- Every other piece: exactly one `SLUG.png` in `default` mode.
 
 One physical item keeps one cutout, manifest record and database ID. These are item previews; create a separate full outfit collection only when the user requests it.
 
-When adding layer suitability to an existing shirt, reuse its accepted closed-top photo after checking its current garment, identity and styling. Copy that photo into the temporary modeled folder as `SLUG-top.png`, generate only the missing open-layer photo, and import the complete two-mode set with its existing cutout. In the web UI, saving the shirt/layer choices exposes **Create layer look** for eligible items with a single accepted photo; it creates the missing layer view without reimporting or duplicating the item.
+When adding layer suitability to an existing piece, reuse its accepted normal photo after checking its current garment, identity and styling. Copy that photo into the temporary modeled folder as `SLUG.png`, generate only the missing layered photo, and import the complete two-mode set with its existing cutout. In the web UI, saving **Can wear as a layer** exposes **Create layer look** for eligible items with a single accepted photo; it creates the missing view without reimporting or duplicating the item.
 
 Use this generation brief:
 
@@ -168,9 +164,9 @@ Create a professional horizontal 3:2 editorial fashion photograph. The first ref
 
 Preserve the person's recognizable face, hair, age, build, and skin texture. [Apply the supplied body proportions and configured model direction.] Preserve the featured garment precisely: color, material, fit, construction, pattern, graphics, logos, text, proportions, closure, and distinctive details. Do not redesign, simplify, replace, or reinterpret it.
 
-Wearing mode: [top: featured shirt closed/buttoned as the top; layer: featured shirt unbuttoned over one visible neutral inner top using only its real opening; default: natural featured-item presentation].
+Wearing mode: [default: natural featured-item presentation, using its normal construction; layer: featured piece worn over an appropriate, visibly distinct inner garment, using only its real construction and closures].
 
-Use understated neutral supporting clothes that complete the outfit without covering or competing with the featured item. Keep the full featured item and every important detail visible. Use a natural pose with arms and accessories away from it.
+Style with the judgment of an experienced menswear stylist: balance fit, proportion, color and texture for the occasion. Choose an appropriate inner piece, such as a simple T-shirt or a hoodie where the outer garment has enough room, and keep the featured item readable. Use understated supporting clothes that complete the outfit without covering or competing with the featured item. Keep the full featured item and every important detail visible. Use a natural pose with arms and accessories away from it.
 
 Place the person in a tasteful real-world setting with warm professional natural light, realistic shadows, authentic skin and fabric texture, and restrained editorial color grading. Leave environmental breathing room for flexible cropping.
 
@@ -192,7 +188,7 @@ node .agents/skills/import-clothes/scripts/import-to-wardrobe.mjs \
   --manifest "$WORK/manifest.json"
 ```
 
-The script validates the cutouts and exact modeled modes, copies immutable image assets into `data/imported/`, and updates `data/library.json` under the same library lock as the web UI. Stable UUIDs from cutout content keep identical imports under one item; physical matching across different cutouts still requires source review. Saved manual shirt/layer choices survive reimport. Metadata-only reimports preserve existing modeled images.
+The script validates the cutouts and exact modeled modes, copies immutable image assets into `data/imported/`, and updates `data/library.json` under the same library lock as the web UI. Stable UUIDs from cutout content keep identical imports under one item; physical matching across different cutouts still requires source review. Saved manual layer suitability survives reimport. Metadata-only reimports preserve existing modeled images.
 
 The database stores `modeledImages: [{id, mode, image}]` and keeps `modeledImage` as the first-image cover for compatibility. The side-panel carousel reads that image list. Validate the copied image count and one physical record per accepted item before declaring delivery complete.
 

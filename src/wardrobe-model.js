@@ -1,21 +1,28 @@
-const MODES = new Set(["top", "layer", "default"]);
+const MODES = new Set(["layer", "default"]);
 
-// A shirt stays a top even when it can also be worn over another top.
+// Wearing suitability is independent of the garment's category.
 export function normalizeLayering(value = {}, existing = {}) {
-  const part = value.part ?? existing.part;
   const manual = existing.layeringSource === "manual" && value.layeringSource !== "manual";
   const source = manual ? existing : { ...existing, ...value };
-  const isShirt = part === "upperbody" && source.isShirt === true;
   return {
-    isShirt,
-    canLayer: isShirt && source.canLayer === true,
+    canLayer: source.canLayer === true,
     layeringSource: source.layeringSource === "manual" ? "manual" : "ai",
   };
 }
 
 export function getExpectedModeledModes(item = {}) {
-  const { isShirt, canLayer } = normalizeLayering(item);
-  return canLayer ? ["top", "layer"] : [isShirt ? "top" : "default"];
+  return normalizeLayering(item).canLayer ? ["default", "layer"] : ["default"];
+}
+
+// Read old records into the current contract without replacing their assets.
+export function normalizeWardrobeItem(value = {}) {
+  const { isShirt: _obsolete, ...item } = value;
+  return {
+    ...item,
+    ...normalizeLayering(item),
+    ...(Array.isArray(item.modeledImages) ? { modeledImages: getModeledImages(item) } : {}),
+    ...(item.modeledLayering ? { modeledLayering: normalizeLayering(item.modeledLayering) } : {}),
+  };
 }
 
 export function getModeledImages(item = {}) {

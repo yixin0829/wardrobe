@@ -12,7 +12,7 @@ import { withLibraryLock } from "./library-store.mjs";
 
 const item = (changes = {}) => ({
   name: "Blue Flannel Shirt", part: "upperbody", color: "#34485c", secondaryColor: null,
-  tags: ["flannel", "buttons"], isShirt: true, canLayer: true,
+  tags: ["flannel", "buttons"], canLayer: true,
   boundingBox: { x: 50, y: 50, width: 900, height: 900 }, ...changes,
 });
 
@@ -49,7 +49,7 @@ function respond(res, status, value) {
 
 // Exercise the actual JSON/multipart HTTP protocol without a live provider or .env.
 async function fixture(t, detected = [item()], seed = []) {
-  const directory = await mkdtemp(path.join(tmpdir(), "wardrobe-shirt-tests-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "wardrobe-layer-tests-"));
   const dataDir = path.join(directory, "data");
   await mkdir(dataDir);
   const source = await png(80, 100);
@@ -75,7 +75,7 @@ async function fixture(t, detected = [item()], seed = []) {
         assert.equal((await sharp(content).metadata()).format, "png");
         return { name: file.name, type: file.type, bytes: content };
       }));
-      const mode = form.get("size") === "1024x1024" ? "garment" : /fully OPEN/.test(prompt) ? "layer" : /CLOSED/.test(prompt) ? "top" : "default";
+      const mode = form.get("size") === "1024x1024" ? "garment" : /Use the featured garment as an OUTER LAYER/i.test(prompt) ? "layer" : "default";
       state.edits.push({ prompt, files, mode, size: form.get("size") });
       if (state.modelGate && mode === state.modelGate.mode) {
         state.modelGate.started();
@@ -125,7 +125,7 @@ async function fixture(t, detected = [item()], seed = []) {
     // The only recursive removal is the exact private mkdtemp fixture root.
     const absolute = path.resolve(directory);
     assert.equal(path.dirname(absolute), path.resolve(tmpdir()));
-    assert.ok(path.basename(absolute).startsWith("wardrobe-shirt-tests-"));
+    assert.ok(path.basename(absolute).startsWith("wardrobe-layer-tests-"));
     await rm(absolute, { recursive: true, force: true });
     assert.deepEqual(state.providerErrors, [], "the fake provider must receive valid requests");
   });
@@ -174,31 +174,36 @@ async function fixture(t, detected = [item()], seed = []) {
   return { directory, dataDir, state, url, newApi, request, upload, waitFor, garmentReview, modeledReview, approveModeled, library };
 }
 
-test("AI prefill leads to exactly two reviewed shirt looks and one persistent wardrobe item", async (t) => {
+test("AI layer eligibility leads to exactly two reviewed looks and one persistent wardrobe item", async (t) => {
   const f = await fixture(t);
   const [job] = await f.upload();
-  assert.equal(job.metadata.isShirt, true);
+  assert.equal(Object.hasOwn(job.metadata, "isShirt"), false);
   assert.equal(job.metadata.canLayer, true);
   assert.equal(job.metadata.layeringSource, "ai");
   assert.equal(job.metadata.part, "upperbody");
   assert.equal(f.state.edits.length, 0, "nothing generates before crop approval");
   const schema = f.state.analysis[0].text.format.schema.properties.items.items;
-  for (const key of ["isShirt", "canLayer"]) {
-    assert.equal(schema.properties[key].type, "boolean");
-    assert.ok(schema.required.includes(key));
-  }
+  assert.equal(schema.properties.canLayer.type, "boolean");
+  assert.ok(schema.required.includes("canLayer"));
+  assert.equal(Object.hasOwn(schema.properties, "isShirt"), false);
+  assert.equal(schema.required.includes("isShirt"), false);
   const analysisPrompt = f.state.analysis[0].input[0].content[0].text;
   assert.match(analysisPrompt, /flannel/i);
   assert.match(analysisPrompt, /dress shirt.*false/i);
   assert.match(analysisPrompt, /uncertain.*false/i);
+  assert.match(analysisPrompt, /jacket/i);
+  assert.match(analysisPrompt, /zip/i);
   const review = await f.modeledReview(job);
-  assert.deepEqual(f.state.edits.map((edit) => edit.mode), ["garment", "top", "layer"]);
-  assert.deepEqual(review.stages.modeled.images.map((image) => image.mode), ["top", "layer"]);
+  assert.deepEqual(f.state.edits.map((edit) => edit.mode), ["garment", "default", "layer"]);
+  assert.deepEqual(review.stages.modeled.images.map((image) => image.mode), ["default", "layer"]);
   const [top, layer] = f.state.edits.filter((edit) => edit.mode !== "garment");
   assert.equal(top.files.length, 2, "face and exact featured garment are sent");
   assert.deepEqual(top.files.map((file) => file.name), ["face-reference.png", "garment.png"]);
-  assert.match(top.prompt, /CLOSED and buttoned/i);
-  assert.match(layer.prompt, /fully OPEN.*inner T-shirt/i);
+  assert.match(top.prompt, /closed|standalone|standard|single/i);
+  assert.match(layer.prompt, /outer layer/i);
+  assert.match(layer.prompt, /T-shirt/i);
+  assert.match(layer.prompt, /hoodie/i);
+  assert.match(layer.prompt, /experienced.*menswear|menswear.*experienced/i);
   assert.deepEqual(layer.files[1].bytes, top.files[1].bytes, "both looks use the identical cutout");
 
   for (const reviewedImageIds of [undefined, [review.stages.modeled.images[0].id]]) {
@@ -241,21 +246,44 @@ test("AI prefill leads to exactly two reviewed shirt looks and one persistent wa
   assert.deepEqual(JSON.parse(await readFile(path.join(f.dataDir, "library.json"), "utf8")), records);
 });
 
-test("dress shirts and other tops each generate only one modeled look", async (t) => {
+test("items AI judges unsuitable as an outer layer each generate only one modeled look", async (t) => {
   const f = await fixture(t, [
     item({ name: "Formal Dress Shirt", canLayer: false, tags: ["formal", "buttons"] }),
-    item({ name: "Plain Tee", isShirt: false, canLayer: true, tags: ["cotton"] }),
+    item({ name: "Plain Tee", canLayer: false, tags: ["cotton"] }),
   ]);
   const jobs = await f.upload();
-  assert.equal(jobs[1].metadata.canLayer, false, "a nonshirt cannot inherit layer eligibility");
-  for (const [index, job] of jobs.entries()) {
+  assert.equal(jobs[1].metadata.canLayer, false);
+  for (const job of jobs) {
     const before = f.state.edits.length;
     const review = await f.modeledReview(job);
-    assert.deepEqual(f.state.edits.slice(before).map((edit) => edit.mode), ["garment", index === 0 ? "top" : "default"]);
+    assert.deepEqual(f.state.edits.slice(before).map((edit) => edit.mode), ["garment", "default"]);
     assert.equal(review.stages.modeled.images.length, 1);
     assert.equal((await f.approveModeled(review)).status, 200);
   }
   assert.deepEqual((await f.library()).map((record) => record.modeledImages.length), [1, 1]);
+});
+
+test("layer eligibility applies across the original categories without changing the garment category", async (t) => {
+  const f = await fixture(t, [
+    item({ name: "Zip Jacket", part: "wholebody_up", tags: ["zip", "lightweight"] }),
+    item({ name: "Zip Hoodie", part: "upperbody", tags: ["zip", "hood"] }),
+  ]);
+  const jobs = await f.upload();
+  for (const job of jobs) {
+    assert.equal(job.metadata.canLayer, true);
+    const review = await f.modeledReview(job);
+    assert.deepEqual(review.stages.modeled.images.map((image) => image.mode), ["default", "layer"]);
+    assert.equal((await f.approveModeled(review)).status, 200);
+  }
+  const records = await f.library();
+  assert.deepEqual(records.map((record) => record.part), ["wholebody_up", "upperbody"]);
+  assert.deepEqual(records.map((record) => record.modeledImages.length), [2, 2]);
+  assert.equal((await f.request(`/api/import/wardrobe/${records[0].id}`, "PATCH", { canLayer: false })).status, 200);
+  const override = await f.request(`/api/import/wardrobe/${records[0].id}`, "PATCH", { part: "accessories_up", canLayer: true, layeringSource: "manual" });
+  assert.equal(override.status, 200);
+  assert.equal(override.value.canLayer, true, "the shared property is not gated by a hardcoded category");
+  assert.equal(override.value.part, "accessories_up");
+  assert.equal(override.value.layeringSource, "manual");
 });
 
 test("manual import-stage classification controls the generated set", async (t) => {
@@ -265,7 +293,7 @@ test("manual import-stage classification controls the generated set", async (t) 
   assert.equal(edit.status, 200);
   assert.equal(edit.value.metadata.layeringSource, "manual");
   const review = await f.modeledReview(job);
-  assert.deepEqual(review.stages.modeled.images.map((image) => image.mode), ["top", "layer"]);
+  assert.deepEqual(review.stages.modeled.images.map((image) => image.mode), ["default", "layer"]);
   assert.equal((await f.approveModeled(review)).status, 200);
   const [record] = await f.library();
   assert.equal(record.canLayer, true);
@@ -287,7 +315,7 @@ test("a second-photo failure cannot publish an incomplete pair, and retry regene
   f.state.failMode = null;
   assert.equal((await f.request(`/api/import/jobs/${job.id}/stages/modeled/regenerate`, "POST", {})).status, 202);
   const review = await f.waitFor(job.id, "modeled", "review");
-  assert.deepEqual(f.state.edits.filter((edit) => edit.mode !== "garment").map((edit) => edit.mode), ["top", "layer", "top", "layer"]);
+  assert.deepEqual(f.state.edits.filter((edit) => edit.mode !== "garment").map((edit) => edit.mode), ["default", "layer", "default", "layer"]);
   assert.equal((await f.approveModeled(review)).status, 200);
   assert.equal((await f.library())[0].modeledImages.length, 2);
 });
@@ -303,7 +331,7 @@ test("changing layer eligibility makes old photos unapprovable until the correct
   assert.equal((await f.library())[0].modeledImages.length, 0);
   assert.equal((await f.request(`/api/import/jobs/${job.id}/stages/modeled/regenerate`, "POST", {})).status, 202);
   const review = await f.waitFor(job.id, "modeled", "review");
-  assert.deepEqual(review.stages.modeled.images.map((image) => image.mode), ["top"]);
+  assert.deepEqual(review.stages.modeled.images.map((image) => image.mode), ["default"]);
   assert.equal((await f.approveModeled(review)).status, 200);
   const [record] = await f.library();
   assert.equal(record.canLayer, false);
@@ -355,7 +383,7 @@ test("an abandoned local library lock is recovered before the next write", async
   await writeFile(lock, JSON.stringify({ pid: 2147483647, owner: randomUUID(), hostname: hostname() }));
   const libraryFile = path.join(f.dataDir, "library.json");
   await withLibraryLock(libraryFile, () => writeFile(libraryFile, JSON.stringify([{ id: "recovered" }])));
-  assert.deepEqual(await f.library(), [{ id: "recovered" }]);
+  assert.deepEqual((await f.library()).map((record) => record.id), ["recovered"]);
   await assert.rejects(readFile(lock), { code: "ENOENT" });
 });
 
@@ -397,7 +425,7 @@ test("deleting an imported item cancels pending or reviewable model jobs and pre
       let started;
       if (phase === "pending") {
         const wait = new Promise((resolve) => { f.state.releaseModel = resolve; });
-        started = new Promise((resolve) => { f.state.modelGate = { mode: "top", wait, release: f.state.releaseModel, started: resolve }; });
+        started = new Promise((resolve) => { f.state.modelGate = { mode: "default", wait, release: f.state.releaseModel, started: resolve }; });
         await f.garmentReview(job);
         assert.equal((await f.request(`/api/import/jobs/${job.id}/stages/garment/approve`, "POST", {})).status, 200);
         await deadline(started, "Model fixture never started");
@@ -435,7 +463,7 @@ test("an abandoned recovery claim is also recovered before writing the wardrobe"
   await writeFile(`${lock}.recovery`, JSON.stringify({ ...abandoned, owner: randomUUID() }));
   const libraryFile = path.join(f.dataDir, "library.json");
   await deadline(withLibraryLock(libraryFile, () => writeFile(libraryFile, JSON.stringify([{ id: "recovered-twice" }]))), "Dead recovery claim blocked the next write", 1500);
-  assert.deepEqual(await f.library(), [{ id: "recovered-twice" }]);
+  assert.deepEqual((await f.library()).map((record) => record.id), ["recovered-twice"]);
   await assert.rejects(readFile(lock), { code: "ENOENT" });
   await assert.rejects(readFile(`${lock}.recovery`), { code: "ENOENT" });
 });
@@ -463,10 +491,10 @@ test("a live recovery owner is preserved and the next writer waits for its relea
     await rm(recovery, { force: true });
     await deadline(writer, "Writer did not continue after the owner released its claim", 1500);
   }
-  assert.deepEqual(await f.library(), [{ id: "after-live-release" }]);
+  assert.deepEqual((await f.library()).map((record) => record.id), ["after-live-release"]);
 });
 
-test("correcting a completed shirt generates only its missing layer look and reuses the active job", async (t) => {
+test("correcting a completed garment generates only its missing layer look and reuses the active job", async (t) => {
   const f = await fixture(t, [item({ canLayer: false })]);
   const [originalJob] = await f.upload();
   const originalReview = await f.modeledReview(originalJob);
@@ -493,9 +521,9 @@ test("correcting a completed shirt generates only its missing layer look and reu
   assert.equal((await f.library())[0].modeledImages.length, 1, "the accepted cover remains intact while its new layer is pending");
   release();
   const review = await f.waitFor(create.value.job.id, "modeled", "review");
-  assert.deepEqual(review.stages.modeled.images.map((image) => image.mode), ["top", "layer"]);
+  assert.deepEqual(review.stages.modeled.images.map((image) => image.mode), ["default", "layer"]);
   const retained = await fetch(`${f.url}${review.stages.modeled.images[0].image}`);
-  assert.deepEqual(Buffer.from(await retained.arrayBuffer()), originalTopBytes, "the accepted closed-shirt photo is reused without regeneration");
+  assert.deepEqual(Buffer.from(await retained.arrayBuffer()), originalTopBytes, "the accepted standard photo is reused without regeneration");
   const unchecked = await f.request(`/api/import/jobs/${review.id}/stages/modeled/approve`, "POST", { reviewedImageIds: [review.stages.modeled.images[1].id] });
   assert.equal(unchecked.status, 409, "the complete pair still requires review");
   assert.equal((await f.approveModeled(review)).status, 200);
@@ -505,7 +533,7 @@ test("correcting a completed shirt generates only its missing layer look and reu
   assert.equal(saved.id, original.id);
   assert.equal(saved.image, original.image, "correction does not replace the physical garment");
   assert.equal(saved.modeledImages[0].image, original.modeledImage);
-  assert.deepEqual(saved.modeledImages.map((image) => image.mode), ["top", "layer"]);
+  assert.deepEqual(saved.modeledImages.map((image) => image.mode), ["default", "layer"]);
   assert.equal(saved.canLayer, true);
   assert.equal(saved.layeringSource, "manual");
   const complete = await f.request(`/api/import/wardrobe/${original.id}/modeled`, "POST", {});
@@ -518,24 +546,59 @@ test("correcting a completed shirt generates only its missing layer look and reu
   assert.deepEqual(f.state.edits.slice(editCount).map((edit) => edit.mode), ["layer"]);
 });
 
-test("a legacy default preview is retained as the closed top after manual shirt correction", async (t) => {
+test("legacy shirt metadata and top modes migrate without replacing accepted photos or item identity", async (t) => {
   const id = `import-${randomUUID()}`;
   const image = `/api/import/library/${id}-garment.png`;
   const modeledImage = `/api/import/library/${id}-modeled.png`;
-  const f = await fixture(t, [], [{ ...item({ isShirt: false, canLayer: false }), id, image, thumbnail: image, modeledImage }]);
+  const f = await fixture(t, [], [{
+    ...item({ isShirt: true, canLayer: false }), id, image, thumbnail: image, modeledImage,
+    modeledImages: [{ id: "accepted-top", mode: "top", image: modeledImage }],
+    modeledLayering: { isShirt: true, canLayer: false, layeringSource: "ai" },
+  }]);
   const oldPhoto = await png();
   await writeFile(path.join(f.dataDir, "imported", `${id}-garment.png`), await png(80, 100));
   await writeFile(path.join(f.dataDir, "imported", `${id}-modeled.png`), oldPhoto);
-  assert.equal((await f.request(`/api/import/wardrobe/${id}`, "PATCH", { isShirt: true, canLayer: true })).status, 200);
+  const [legacy] = await f.library();
+  assert.equal(Object.hasOwn(legacy, "isShirt"), false);
+  assert.equal(Object.hasOwn(legacy.modeledLayering, "isShirt"), false);
+  assert.deepEqual(legacy.modeledImages, [{ id: "accepted-top", mode: "default", image: modeledImage }]);
+  const patched = await f.request(`/api/import/wardrobe/${id}`, "PATCH", { canLayer: true });
+  assert.equal(patched.status, 200);
+  assert.equal(Object.hasOwn(patched.value, "isShirt"), false);
+  const persisted = JSON.parse(await readFile(path.join(f.dataDir, "library.json"), "utf8"));
+  assert.equal(JSON.stringify(persisted).includes('"isShirt"'), false);
   const created = await f.request(`/api/import/wardrobe/${id}/modeled`, "POST", {});
   assert.equal(created.status, 202);
+  assert.equal(Object.hasOwn(created.value.job.metadata, "isShirt"), false);
   const review = await f.waitFor(created.value.job.id, "modeled", "review");
   assert.deepEqual(f.state.edits.map((edit) => edit.mode), ["layer"]);
-  assert.deepEqual(review.stages.modeled.images.map((entry) => entry.mode), ["top", "layer"]);
+  assert.deepEqual(review.stages.modeled.images.map((entry) => entry.mode), ["default", "layer"]);
+  assert.equal(review.stages.modeled.images[0].id, "accepted-top");
+  assert.equal(Object.hasOwn(review.stages.modeled.generationLayering, "isShirt"), false);
   assert.deepEqual(Buffer.from(await (await fetch(`${f.url}${review.stages.modeled.images[0].image}`)).arrayBuffer()), oldPhoto);
   assert.equal((await f.approveModeled(review)).status, 200);
   const [saved] = await f.library();
   assert.equal(saved.id, id);
   assert.equal(saved.modeledImages.length, 2);
   assert.equal(saved.image, image);
+  assert.equal(Object.hasOwn(saved, "isShirt"), false);
+});
+
+test("stale provider and persisted job shirt flags are discarded by the general layer contract", async (t) => {
+  const f = await fixture(t, [item({ name: "Legacy Jacket", part: "wholebody_up", isShirt: false })]);
+  const [job] = await f.upload();
+  assert.equal(job.metadata.canLayer, true, "old shirt flags cannot gate a jacket's layer eligibility");
+  assert.equal(Object.hasOwn(job.metadata, "isShirt"), false);
+  const jobFile = path.join(f.dataDir, "jobs", job.id, "job.json");
+  const stale = JSON.parse(await readFile(jobFile, "utf8"));
+  stale.metadata.isShirt = false;
+  stale.stages.modeled.generationLayering = { isShirt: false, canLayer: true, layeringSource: "ai" };
+  stale.stages.modeled.images = [{ id: "legacy-top", mode: "top", image: "/api/import/library/legacy-photo.png" }];
+  await writeFile(jobFile, JSON.stringify(stale));
+  const reloaded = await f.newApi();
+  const response = await f.request(`/api/import/jobs/${job.id}`, "GET", undefined, reloaded);
+  assert.equal(response.status, 200);
+  assert.equal(Object.hasOwn(response.value.metadata, "isShirt"), false);
+  assert.equal(Object.hasOwn(response.value.stages.modeled.generationLayering, "isShirt"), false);
+  assert.equal(response.value.stages.modeled.images[0].mode, "default");
 });

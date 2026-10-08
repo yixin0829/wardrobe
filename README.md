@@ -40,9 +40,11 @@ $generate-outfits Create modeled outfit ideas from my wardrobe.
 
 Open the cloned repo in Codex and run either prompt. The import skill asks for a local model-reference PNG when needed, reviews every cutout and modeled photo, then writes to `data/library.json` and `data/imported/`. The outfit skill asks how many looks to create, then curates, generates, verifies, and saves the complete collection under `data/`.
 
-Shirts stay in **Tops**. AI prepopulates **Shirt** and **Can wear as a layer** during import: casual flannels and overshirts can qualify, while dress shirts and uncertain cases default to tops only. You can edit these choices; saved manual choices take precedence on reimport. When modeled previews are requested, a layerable shirt gets two images—buttoned as a top and unbuttoned over an inner top—and other pieces get one. Hover over the side-panel photo to reveal arrows, or use the focused carousel's keyboard controls, to browse the pair. Each shirt still counts as one wardrobe item.
+The original **Tops, Jackets, Bottoms, Accessories and Shoes** categories stay unchanged. AI prepopulates **Can wear as a layer** independently of category during import, using the piece’s construction, weight and fit. Casual flannels, textured shirts and zip-up jackets can qualify; uncertain cases default to false. You can edit this choice, and saved manual choices take precedence on reimport. When modeled previews are requested, a layerable piece gets exactly two images—its normal presentation and a layered look—and other pieces get one. Hover over the side-panel photo to reveal arrows, or use the focused carousel's keyboard controls, to browse the pair. Each physical piece still counts as one wardrobe item.
 
-For an existing shirt with one accepted modeled photo, save **Shirt** and **Can wear as a layer**, then choose **Create layer look**. Wardrobe keeps the accepted buttoned photo and generates only the missing unbuttoned view for review, without reimporting the shirt.
+For an existing piece with one accepted modeled photo, save **Can wear as a layer**, then choose **Create layer look**. Wardrobe keeps the accepted normal photo and generates only the missing layered view for review, without reimporting the piece.
+
+Complete outfits use thoughtful menswear styling: fit, proportion, color, texture and occasion guide the choice of actual wardrobe inner pieces, including T-shirts or hoodies when appropriate.
 
 ### For agents
 
@@ -55,7 +57,7 @@ If you are setting up Wardrobe for a user, ask how they want to import their clo
 
 - Detects every garment in a photo with the OpenAI Responses API
 - Extracts clean product cutouts with the OpenAI Images API
-- Generates optional modeled editorial previews: two for a layerable shirt, one for other pieces
+- Generates optional modeled editorial previews: two for a layerable piece, one for other pieces
 - Keeps originals, jobs, generated images, and the JSON database local in `data/`
 - Supports drag, drop, paste, editing, review, regeneration, and approval
 

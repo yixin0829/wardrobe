@@ -52,14 +52,17 @@ const shirt = (color, flannel = false) => `
   <path d="M256 140V537" stroke="#274153" stroke-width="5"/>
   ${[178, 244, 310, 376, 442, 508].map((y) => `<circle cx="256" cy="${y}" r="4" fill="#e0d7c7"/>`).join("")}`;
 const tee = `<path d="M168 132L218 105Q256 146 294 105L344 132L405 228L357 267L323 225V531H189V225L155 267L107 228Z" fill="#b56543" stroke="#84452d" stroke-width="3"/><path d="M218 105Q256 164 294 105" fill="none" stroke="#84452d" stroke-width="7"/>`;
+const jacket = `<path d="M170 98L224 78H288L342 98L422 260L371 288L331 211V537H181V211L141 288L90 260Z" fill="#60765d" stroke="#344831" stroke-width="4"/><path d="M224 78L239 125H273L288 78M256 125V537" fill="none" stroke="#d5cdbb" stroke-width="7"/><path d="M194 359L231 345M281 345L318 359" stroke="#d5cdbb" stroke-width="5"/><path d="M181 515H331M106 252L142 275M370 275L406 252" stroke="#344831" stroke-width="12"/>`;
 const trousers = (color, margin = 0) => `<g transform="translate(0 ${margin})"><path d="M177 72H335L342 303L323 556H267L256 298L245 556H189L170 303Z" fill="${color}" stroke="#5b5e62" stroke-width="3"/><path d="M177 103H335M256 75V193M188 112Q188 158 218 161M324 112Q324 158 294 161" fill="none" stroke="#c4baa9" stroke-width="3"/></g>`;
 
 function modeled(mode, name) {
   const layer = mode === "layer";
   const flannel = /flannel/i.test(name);
-  const color = flannel ? "#436377" : /tee/i.test(name) ? "#b56543" : "#d2dfdc";
+  const isJacket = /jacket/i.test(name);
+  const color = flannel ? "#436377" : isJacket ? "#60765d" : /tee/i.test(name) ? "#b56543" : "#d2dfdc";
+  const innerTop = isJacket ? `<path d="M332 146Q362 128 391 146L390 275H324Z" fill="#ccc8bf"/><path d="M340 147Q330 131 343 117Q362 107 381 117Q394 131 384 147" fill="none" stroke="#ccc8bf" stroke-width="9"/><path d="M342 159V207M381 159V207" stroke="#8b8982" stroke-width="2"/>` : `<path d="M332 145H382L391 275H323Z" fill="#f7f4ed"/>`;
   const torso = layer
-    ? `<path d="M332 145H382L391 275H323Z" fill="#f7f4ed"/><path d="M312 138L342 131L335 288L307 275L306 185L287 243L271 236Z" fill="${color}"/><path d="M382 131L412 138L452 236L435 243L416 185L417 275L389 288Z" fill="${color}"/>`
+    ? `${innerTop}<path d="M312 138L342 131L335 288L307 275L306 185L287 243L271 236Z" fill="${color}"/><path d="M382 131L412 138L452 236L435 243L416 185L417 275L389 288Z" fill="${color}"/>`
     : `<path d="M312 138L342 131H382L412 138L452 236L435 243L410 185L413 282H310L314 185L289 243L272 236Z" fill="${color}"/><path d="M342 131L362 152L382 131" fill="none" stroke="#264254" stroke-width="3"/><path d="M362 152V282" stroke="#2a4658" stroke-width="2"/>${[170, 194, 218, 242, 266].map((y) => `<circle cx="362" cy="${y}" r="2.2" fill="#efe6d5"/>`).join("")}`;
   return frame(`
     <rect x="32" y="30" width="215" height="360" rx="6" fill="#d9c9b5"/>
@@ -80,8 +83,8 @@ function modeled(mode, name) {
 try {
   await mkdir(fixtureDir, { recursive: true });
   await mkdir(path.join(dataDir, "imported"), { recursive: true });
-  const fixtureNames = ["blue-flannel-shirt.png", "rust-cotton-tee.png", "formal-dress-shirt.png"];
-  const sources = [frame(shirt("#436377", true), "#ebf0f4"), frame(tee, "#f5eee7"), frame(shirt("#d2dfdc"), "#edf1ef")];
+  const fixtureNames = ["blue-flannel-shirt.png", "rust-cotton-tee.png", "formal-dress-shirt.png", "olive-zip-jacket.png"];
+  const sources = [frame(shirt("#436377", true), "#ebf0f4"), frame(tee, "#f5eee7"), frame(shirt("#d2dfdc"), "#edf1ef"), frame(jacket, "#e4ece3")];
   await Promise.all(sources.map(async (svg, index) => writeFile(path.join(fixtureDir, fixtureNames[index]), await png(svg))));
   await writeFile(path.join(dataDir, "model-reference.png"), await png(frame(`<circle cx="256" cy="182" r="63" fill="#c0aa8a"/><path d="M140 510V360Q256 253 372 360V510Z" fill="#606d73"/>`, "#ebe6dd")));
   try { await readFile(path.join(dataDir, "library.json")); }
@@ -92,7 +95,7 @@ try {
       const id = `import-${index ? "22222222" : "11111111"}-1111-4111-8111-111111111111`;
       const filename = `${id}-synthetic.png`;
       await writeFile(path.join(dataDir, "imported", filename), await png(frame(trousers(color), null)));
-      seeds.push({ id, name: index ? "Beige Chinos" : "Dark Indigo Straight-leg Jeans", part: "lowerbody", color, secondaryColor: null, tags: ["32 x 32", "synthetic fixture"], isShirt: false, canLayer: false, image: `/api/import/library/${filename}`, thumbnail: `/api/import/library/${filename}` });
+      seeds.push({ id, name: index ? "Beige Chinos" : "Dark Indigo Straight-leg Jeans", part: "lowerbody", color, secondaryColor: null, tags: ["32 x 32", "synthetic fixture"], canLayer: false, image: `/api/import/library/${filename}`, thumbnail: `/api/import/library/${filename}` });
     }
     await writeFile(path.join(dataDir, "library.json"), JSON.stringify(seeds, null, 2));
   }
@@ -110,10 +113,11 @@ try {
         const request = JSON.parse(bytes.toString());
         const imageUrl = request.input[0].content.find((part) => part.type === "input_image").image_url;
         const pixels = await sharp(Buffer.from(imageUrl.split(",")[1], "base64")).ensureAlpha().raw().toBuffer();
-        const index = pixels[0] === 235 ? 0 : pixels[0] === 245 ? 1 : 2;
-        const names = ["Blue Flannel Shirt", "Rust Cotton Tee", "Formal Dress Shirt"];
-        const item = { name: names[index], part: "upperbody", color: ["#436377", "#b56543", "#d2dfdc"][index], secondaryColor: index === 0 ? "#879aa8" : null, tags: [index === 0 ? "flannel" : index === 1 ? "cotton" : "formal"], isShirt: index !== 1, canLayer: index === 0, boundingBox: { x: 150, y: 100, width: 700, height: 790 } };
-        state.analysis.push({ name: item.name, isShirt: item.isShirt, canLayer: item.canLayer, schemaHasFlags: Boolean(request.text.format.schema.properties.items.items.properties.canLayer) });
+        const index = pixels[0] === 235 ? 0 : pixels[0] === 245 ? 1 : pixels[0] === 228 ? 3 : 2;
+        const names = ["Blue Flannel Shirt", "Rust Cotton Tee", "Formal Dress Shirt", "Olive Zip Jacket"];
+        const item = { name: names[index], part: index === 3 ? "wholebody_up" : "upperbody", color: ["#436377", "#b56543", "#d2dfdc", "#60765d"][index], secondaryColor: index === 0 ? "#879aa8" : null, tags: [index === 0 ? "flannel" : index === 1 ? "cotton" : index === 3 ? "zip" : "formal"], canLayer: index === 0 || index === 3, boundingBox: { x: 150, y: 100, width: 700, height: 790 } };
+        const schema = request.text.format.schema.properties.items.items;
+        state.analysis.push({ name: item.name, part: item.part, canLayer: item.canLayer, schemaHasLayering: Boolean(schema.properties.canLayer), schemaHasShirt: Object.hasOwn(schema.properties, "isShirt") });
         return respond(res, 200, { output_text: JSON.stringify({ items: [item] }) });
       }
       if (req.url !== "/v1/images/edits") throw new Error("Unknown fixture provider route");
@@ -123,14 +127,14 @@ try {
       for (const file of files) {
         if ((await sharp(Buffer.from(await file.arrayBuffer())).metadata()).format !== "png") throw new Error("Expected PNG references");
       }
-      const mode = form.get("size") === "1024x1024" ? "garment" : /fully OPEN/.test(prompt) ? "layer" : /CLOSED/.test(prompt) ? "top" : "default";
-      const name = /flannel/i.test(prompt) ? "Blue Flannel Shirt" : /tee/i.test(prompt) && !/shirt/i.test(prompt.split("from Image")[0]) ? "Rust Cotton Tee" : "Formal Dress Shirt";
-      state.edits.push({ mode, name, referenceCount: files.length, size: form.get("size"), openWithInnerTop: mode === "layer" && /inner T-shirt/.test(prompt) });
+      const mode = form.get("size") === "1024x1024" ? "garment" : /Use the featured garment as an OUTER LAYER/i.test(prompt) ? "layer" : "default";
+      const name = /Olive Zip Jacket/.test(prompt) ? "Olive Zip Jacket" : /Blue Flannel Shirt/.test(prompt) ? "Blue Flannel Shirt" : /Rust Cotton Tee/.test(prompt) ? "Rust Cotton Tee" : "Formal Dress Shirt";
+      state.edits.push({ mode, name, referenceCount: files.length, size: form.get("size"), thoughtfullyStyledInnerLayer: mode === "layer" && /T-shirt/i.test(prompt) && /hoodie/i.test(prompt) && /experienced.*menswear|menswear.*experienced/i.test(prompt) });
       let output;
       if (mode === "garment") {
         const key = prompt.match(/uniform solid (#[a-f0-9]{6}) chroma-key/i)?.[1];
         if (!key) throw new Error("No source chroma key");
-        const body = /flannel/i.test(name) ? shirt("#436377", true) : /tee/i.test(name) ? tee : shirt("#d2dfdc");
+        const body = /jacket/i.test(name) ? jacket : /flannel/i.test(name) ? shirt("#436377", true) : /tee/i.test(name) ? tee : shirt("#d2dfdc");
         output = await png(frame(body, key));
       } else output = await png(modeled(mode, name));
       return respond(res, 200, { data: [{ b64_json: output.toString("base64") }] });

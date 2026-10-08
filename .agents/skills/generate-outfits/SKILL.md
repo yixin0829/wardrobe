@@ -11,7 +11,7 @@ Create a complete local outfit collection from `data/library.json`: select stron
 
 Ask `How many outfits would you like me to generate?` unless the user already provided a positive count. Do not choose a default silently.
 
-Preserve a count or range the user already authorized, including during corrections or regeneration. Item-preview pairs for layerable shirts do not increase the requested lookbook count.
+Preserve a count or range the user already authorized, including during corrections or regeneration. Item-preview pairs for layerable pieces do not increase the requested lookbook count.
 
 Also obtain the intended season, occasions, dress codes, or styling direction when the user named them. Otherwise create a balanced everyday mix without blocking on more questions.
 
@@ -42,7 +42,7 @@ Read `data/library.json`. Resolve `/api/import/library/FILENAME` assets to `data
 - `accessories_up` — optional accessories
 - `shoes` — optional shoes
 
-Layerable shirts remain in `upperbody`. Read `isShirt`, `canLayer` and `layeringSource`; respect saved manual choices. Only `upperbody` items with both `isShirt: true` and `canLayer: true` may additionally fill the outer-layer slot. Older items without these fields remain tops until classified or edited.
+Read `canLayer` and `layeringSource` independently of category and respect saved manual choices. A suitable item with `canLayer: true` may fill an outer-layer role while retaining its original category and physical ID. Do not assume every jacket qualifies or restrict layers to shirts. Older items without layer suitability remain in their normal role until assessed or edited.
 
 Create checkerboard contact sheets of at most 12 garment cutouts and inspect them. Use both metadata and visual evidence; do not style from filenames or colors alone.
 
@@ -50,9 +50,9 @@ If the wardrobe cannot support the requested number of genuinely distinct outfit
 
 ## 2. Curate the combinations
 
-Each outfit must contain exactly one top and one bottom, with an optional jacket, shoes, and restrained accessory. Use these principles recovered from the established Wardrobe outfit workflow:
+Each outfit must contain exactly one inner or standalone top and one bottom, with an optional suitable outer layer, shoes and restrained accessory. Style with the judgment of an experienced menswear stylist: choose combinations for their fit, proportion, color, texture and occasion. The aim is fashionable, well-balanced layering.
 
-A layerable shirt can fill either the top slot (closed/buttoned) or the outer-layer slot (unbuttoned over a distinct inner top). Give suitable shirts one combination in each mode where the wardrobe and requested count support it. Keep one physical garment ID and select it at most once per outfit. Non-layerable shirts are tops only.
+A layerable piece can appear in its normal role (`default`) or as an outer layer (`layer`) over a distinct, compatible inner piece from the wardrobe. An inner piece can be a T-shirt, hoodie or another appropriate top: match its bulk and neckline to the outer piece, and make both recognizable. Use only the garment’s real construction and closures. Keep one physical garment ID and select it at most once per outfit. Include layered and normal combinations where the available wardrobe and requested count support them.
 
 - Favor tonal or analogous color harmony for cohesion.
 - Use complementary contrast selectively and keep one color or garment dominant.
@@ -76,7 +76,7 @@ Build `$WORK/outfits.json` with the final target count:
       "occasion": ["smart-casual", "office"],
       "garmentIds": ["import-...", "import-..."],
       "garmentModes": [
-        { "garmentId": "import-...", "role": "top", "mode": "top" },
+        { "garmentId": "import-...", "role": "top", "mode": "default" },
         { "garmentId": "import-...", "role": "bottom", "mode": "default" }
       ],
       "reason": "Deep navy and camel create controlled warm-cool contrast.",
@@ -88,7 +88,7 @@ Build `$WORK/outfits.json` with the final target count:
 }
 ```
 
-Use stable lowercase hyphenated IDs and actual distinct wardrobe IDs in `garmentIds` and `garmentModes`. Record every garment's role and mode (`top`, `layer` or `default`); a layerable shirt in the outer slot has `role: "outer"`, `mode: "layer"`. The sorted garment-ID/role/mode assignments define uniqueness, so the same shirt worn closed and open can form different looks while renaming a combination cannot.
+Use stable lowercase hyphenated IDs and actual distinct wardrobe IDs in `garmentIds` and `garmentModes`. Record every garment's role and mode (`default` or `layer`); a layerable piece in the outer slot has `role: "outer"`, `mode: "layer"`. The sorted garment-ID/role/mode assignments define uniqueness, so the same piece in its normal and layered presentation can form different looks while renaming a combination cannot.
 
 ## 3. Prepare references and prompts
 
@@ -104,7 +104,7 @@ The primary identity reference controls the face. If present, include `data/mode
 
 Read [references/outfit-image-prompt.md](references/outfit-image-prompt.md) and fill its template from the exact outfit record. Inspect every outer-layer reference before choosing the layered clause; never infer a zipper, buttons, placket, opening, or closure.
 
-Use the recorded garment roles/modes explicitly: shirt-as-top is closed/buttoned; shirt-as-layer is unbuttoned with the exact selected inner top visible. Keep real openings and garment proportions in both cases.
+Use the recorded garment roles/modes explicitly: `default` is the normal presentation; `layer` places the piece over the exact selected inner top, keeping both visibly identifiable. A real button or zip opening may be open or partly open; pullovers remain closed. Keep true garment lengths, proportions and construction.
 
 Rotate restrained warm, natural settings across the collection while keeping one cohesive editorial art direction.
 
@@ -125,7 +125,7 @@ Require:
 - exact garment color, material, fit, construction, graphics, logos, text, proportions, and closures
 - complete head-to-shoes framing with readable outfit and realistic anatomy
 - natural layering without invented openings or hidden inner pieces
-- every shirt in its recorded closed-top or open-layer mode, with a visible distinct inner top for layer mode
+- every piece in its recorded default or layer mode, with a visible distinct wardrobe inner top for layer mode
 - no unselected visible garments except plain neutral shoes or invisible basics when no shoes were selected
 - no extra person, text overlay, watermark, product mockup, or synthetic AI polish
 

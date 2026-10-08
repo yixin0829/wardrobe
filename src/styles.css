@@ -542,12 +542,12 @@ button { font: inherit; }
 .create-modeled-look button:disabled { opacity: .5; cursor: default; }
 .viewer-actions button:disabled { opacity: .5; cursor: default; }
 .item-edit-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
-.shirt-controls { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 0; border: 0; }
-.shirt-controls legend { margin-bottom: 9px; color: var(--muted); font-size: 10px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; }
-.shirt-checkbox { display: flex; align-items: center; gap: 9px; min-height: 34px; cursor: pointer; font-size: 13px; }
-.shirt-checkbox input { width: 16px; height: 16px; margin: 0; accent-color: var(--ink); }
-.shirt-checkbox input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.shirt-controls p { margin: 4px 0 0 25px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.layering-controls { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 0; border: 0; }
+.layering-controls legend { margin-bottom: 9px; color: var(--muted); font-size: 10px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; }
+.layering-checkbox { display: flex; align-items: center; gap: 9px; min-height: 34px; cursor: pointer; font-size: 13px; }
+.layering-checkbox input { width: 16px; height: 16px; margin: 0; accent-color: var(--ink); }
+.layering-checkbox input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.layering-controls p { margin: 4px 0 0 25px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 
 .viewer-text-close {
   border: 0;

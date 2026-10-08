@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { CaretLeft, CaretRight } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 
-const MODE_LABELS = { top: "As a top", layer: "As a layer", default: "Modeled look" };
+const MODE_LABELS = { layer: "Layered look", default: "Styled look" };
 
 export function ModeledCarousel({ images, label, className = "", imageClassName = "", imageProps = {}, onImageViewed }) {
   const [index, setIndex] = useState(0);

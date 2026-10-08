@@ -5,12 +5,12 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import sharp from "sharp";
-import { getExpectedModeledModes, getModeledImages, normalizeLayering } from "../../../../src/wardrobe-model.js";
+import { getExpectedModeledModes, getModeledImages, normalizeLayering, normalizeWardrobeItem } from "../../../../src/wardrobe-model.js";
 import { withLibraryLock } from "../../../../scripts/library-store.mjs";
 
 const PARTS = new Set(["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
 const HEX = /^#[0-9a-f]{6}$/i;
-const MODES = new Set(["top", "layer", "default"]);
+const MODES = new Set(["layer", "default"]);
 
 function usage(message) {
   if (message) console.error(`Error: ${message}\n`);
@@ -64,12 +64,9 @@ function normalizeItem(item) {
   const tags = Array.isArray(item.tags)
     ? item.tags.filter((tag) => typeof tag === "string").map((tag) => tag.trim().toLowerCase()).filter(Boolean).slice(0, 12)
     : [];
-  const classified = Object.hasOwn(item, "isShirt") || Object.hasOwn(item, "canLayer");
-  if (classified && (typeof item.isShirt !== "boolean" || typeof item.canLayer !== "boolean")) {
-    throw new Error(`${slug}: isShirt and canLayer must both be booleans`);
-  }
-  if (classified && ((item.isShirt && item.part !== "upperbody") || (item.canLayer && !item.isShirt))) {
-    throw new Error(`${slug}: only a shirt in Tops can wear as a layer`);
+  const classified = Object.hasOwn(item, "canLayer");
+  if (classified && typeof item.canLayer !== "boolean") {
+    throw new Error(`${slug}: canLayer must be a boolean`);
   }
   if (item.layeringSource !== undefined && !["ai", "manual"].includes(item.layeringSource)) {
     throw new Error(`${slug}: layeringSource must be ai or manual`);
@@ -79,9 +76,10 @@ function normalizeItem(item) {
     if (!Array.isArray(item.modeledFiles)) throw new Error(`${slug}: modeledFiles must be an array`);
     const modes = new Set();
     modeledFiles = item.modeledFiles.map((entry) => {
-      if (!entry || !MODES.has(entry.mode) || modes.has(entry.mode)) throw new Error(`${slug}: modeledFiles must have unique valid modes`);
-      modes.add(entry.mode);
-      return { mode: entry.mode, file: localPng(entry.file, slug, "modeledFiles.file") };
+      const mode = entry?.mode === "top" ? "default" : entry?.mode;
+      if (!MODES.has(mode) || modes.has(mode)) throw new Error(`${slug}: modeledFiles must have unique valid modes`);
+      modes.add(mode);
+      return { mode, file: localPng(entry.file, slug, "modeledFiles.file") };
     });
   } else if (item.modeledFile) {
     modeledFiles = [{ mode: null, file: localPng(item.modeledFile, slug, "modeledFile") }];
@@ -92,7 +90,7 @@ function normalizeItem(item) {
     modeledFiles,
     modeledFilesPresent: item.modeledFiles !== undefined,
     classified,
-    ...(classified ? { isShirt: item.isShirt, canLayer: item.canLayer, layeringSource: item.layeringSource || "ai" } : {}),
+    ...(classified ? { canLayer: item.canLayer, layeringSource: item.layeringSource || "ai" } : {}),
     name: typeof item.name === "string" && item.name.trim() ? item.name.trim().slice(0, 120) : slug.split("-").map((word) => word[0].toUpperCase() + word.slice(1)).join(" "),
     part: item.part,
     color: item.color.toLowerCase(),
@@ -143,8 +141,8 @@ async function writeAsset(file, bytes) {
 }
 
 function previewModes(item, layering, existing) {
-  const modes = item.modeledFiles.map(({ mode }) => mode || (layering.isShirt ? "top" : "default"));
-  if (modes.length && (item.classified || item.modeledFilesPresent || existing?.isShirt !== undefined)) {
+  const modes = item.modeledFiles.map(({ mode }) => mode || "default");
+  if (modes.length && (item.classified || item.modeledFilesPresent || existing?.canLayer !== undefined)) {
     const expected = getExpectedModeledModes({ ...item, ...layering });
     if (modes.length !== expected.length || expected.some((mode) => !modes.includes(mode))) {
       throw new Error(`${item.slug}: modeled photos must have exactly ${expected.join(" and ")} modes; check saved manual choices before generation`);
@@ -197,7 +195,7 @@ async function importRecords() {
   const records = await readJson(libraryFile, []);
   if (!Array.isArray(records)) throw new Error(`${libraryFile} must contain a JSON array`);
 
-  const nextRecords = [...records];
+  const nextRecords = records.map(normalizeWardrobeItem);
   for (const item of prepared) {
     const assetUrl = `/api/import/library/${item.assetName}`;
     const existingIndex = nextRecords.findIndex((entry) => entry.id === item.id);

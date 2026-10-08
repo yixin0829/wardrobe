@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { getExpectedModeledModes, getModeledImages, normalizeLayering } from "../src/wardrobe-model.js";
+import { getExpectedModeledModes, getModeledImages, normalizeLayering, normalizeWardrobeItem } from "../src/wardrobe-model.js";
 import { withLibraryLock as lockLibrary } from "./library-store.mjs";
 
 const API_ROOT = "/api/import/jobs";
@@ -301,7 +301,7 @@ function stageState() {
 }
 
 export function buildAnalysisPrompt() {
-  return "Identify every distinct wearable clothing item visible in this image. A photo may show one isolated garment or a person wearing several items. Return one record per actual item that should enter a wardrobe. Ignore the person's body and non-wearable background objects. For each item, include a tight bounding box around only that item using integer coordinates normalized to a 1000 by 1000 image: x and y are the top-left corner, followed by width and height. Boxes may overlap when garments overlap, but each box must focus on one distinct item. Use only these category ids: upperbody, wholebody_up, lowerbody, accessories_up, shoes. Suggest a concise specific name, primary hex color, optional genuinely distinct secondary hex color, and 1-4 useful lowercase detail tags. Keep shirts under upperbody. Set isShirt true only for a shirt with a source-supported full-front button or snap opening; tees, polos, pullovers and jackets are not shirts. Set canLayer true only for an upperbody shirt that can plausibly be worn fully open as a casual outer layer over an inner top, such as a flannel shirt, casual overshirt or relaxed casual button shirt. A formal dress shirt defaults to canLayer false. Require evidence of a real full opening and appropriate casual fabric, construction and fit; uncertain suitability or hidden construction means false. Do not invent an opening or infer suitability from color alone. Both isShirt and canLayer must be false for other categories.";
+  return "Identify every distinct wearable clothing item visible in this image. A photo may show one isolated garment or a person wearing several items. Return one record per actual item that should enter a wardrobe. Ignore the person's body and non-wearable background objects. For each item, include a tight bounding box around only that item using integer coordinates normalized to a 1000 by 1000 image: x and y are the top-left corner, followed by width and height. Boxes may overlap when garments overlap, but each box must focus on one distinct item. Use only these category ids: upperbody (Tops), wholebody_up (Jackets), lowerbody (Bottoms), accessories_up (Accessories), shoes (Shoes). Keep each item's usual category. Suggest a concise specific name, primary hex color, optional genuinely distinct secondary hex color, and 1-4 useful lowercase detail tags. Independently infer canLayer for every item: true when its visible construction, fabric and fit make it suitable as an outer garment over a compatible inner garment. Casual flannel or textured shirts, zip-up jackets, cardigans and layer-friendly hoodies can qualify. Consider room for the inner garment and whether the result would be well-proportioned menswear. A formal dress shirt normally serves as an inner or standalone top and defaults to false; ordinary tees, bottoms, accessories and shoes generally default to false. Category alone must not decide suitability. Uncertain construction or suitability means false. Preserve source-supported openings and fasteners; do not invent them or infer suitability from color alone.";
 }
 
 export function buildModeledPrompt(metadata = {}, mode = "default", referenceCount = 1, direction = "") {
@@ -310,10 +310,8 @@ export function buildModeledPrompt(metadata = {}, mode = "default", referenceCou
     ? `Image 1 is for face and hair identity only. Images 2 through ${referenceCount} are body-proportion references. Preserve the person's recognizable face, hair, age, build, skin texture and body proportions from those respective references.`
     : "Image 1 is the identity reference. Preserve the person's recognizable face, hair, age, build, skin texture and body proportions.";
   const wearing = mode === "layer"
-    ? "Wear the featured shirt fully OPEN as a casual outer layer over a plain neutral inner T-shirt. The inner top must be visibly present. Show the shirt's real source-supported front opening and fasteners; never invent a zipper or change buttons or snaps. Keep both sides of the featured shirt visible and its sleeves and hem unobstructed."
-    : mode === "top"
-      ? "Wear the featured shirt CLOSED and buttoned or snapped up as the outfit's top. Keep its real front closure, collar, cuffs and hem readable. Do not wear a visible inner layer or extra outer layer."
-      : "Wear the exact featured garment naturally as its usual category. Use understated neutral supporting clothes that complete the outfit without covering or competing with the featured item.";
+    ? "Use the featured garment as an OUTER LAYER over a visibly present, compatible inner garment. Apply thoughtful menswear styling with the judgment of an experienced menswear stylist: balance fit, proportion, color, texture, fabric weight and occasion. Choose an inner T-shirt, lightweight hoodie, fine knit or another appropriate base to suit this particular piece; allow enough room and avoid bulky, strained combinations. Wear real buttoned or zipped openings open when appropriate; for pullovers, show the inner garment naturally at the neckline or hem. Preserve the source-supported construction and fasteners. Keep the featured garment's sleeves, hem and distinctive details readable."
+    : "Show the featured garment in its STANDARD LOOK, worn naturally in a usual way appropriate to its construction and category. Fasten its real buttons, snaps or zipper where appropriate. Use well-balanced supporting clothes needed to complete a wearable outfit without covering or competing with the featured item.";
   return `Create a professional horizontal 3:2 editorial fashion photograph of this person wearing the exact ${metadata.name || "garment"} from Image ${garmentIndex}. ${identity}
 
 Preserve the featured garment precisely: color, material, fit, construction, pattern, graphics, logos, text, proportions, closure and distinctive details. Do not redesign, simplify, replace or reinterpret it. ${wearing}
@@ -355,7 +353,7 @@ async function openAIAnalyze({ key, baseUrl, model, image, mime }) {
         { type: "input_text", text: buildAnalysisPrompt() },
         { type: "input_image", image_url: `data:${mime};base64,${image.toString("base64")}` },
       ] }],
-      text: { format: { type: "json_schema", name: "wardrobe_items", strict: true, schema: { type: "object", additionalProperties: false, properties: { items: { type: "array", minItems: 0, maxItems: 8, items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, part: { type: "string", enum: ["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"] }, color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, secondaryColor: { anyOf: [{ type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, { type: "null" }] }, tags: { type: "array", items: { type: "string" }, maxItems: 4 }, isShirt: { type: "boolean" }, canLayer: { type: "boolean" }, boundingBox: { type: "object", additionalProperties: false, properties: { x: { type: "integer", minimum: 0, maximum: 999 }, y: { type: "integer", minimum: 0, maximum: 999 }, width: { type: "integer", minimum: 1, maximum: 1000 }, height: { type: "integer", minimum: 1, maximum: 1000 } }, required: ["x", "y", "width", "height"] } }, required: ["name", "part", "color", "secondaryColor", "tags", "isShirt", "canLayer", "boundingBox"] } } }, required: ["items"] } } },
+      text: { format: { type: "json_schema", name: "wardrobe_items", strict: true, schema: { type: "object", additionalProperties: false, properties: { items: { type: "array", minItems: 0, maxItems: 8, items: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, part: { type: "string", enum: ["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"] }, color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, secondaryColor: { anyOf: [{ type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }, { type: "null" }] }, tags: { type: "array", items: { type: "string" }, maxItems: 4 }, canLayer: { type: "boolean" }, boundingBox: { type: "object", additionalProperties: false, properties: { x: { type: "integer", minimum: 0, maximum: 999 }, y: { type: "integer", minimum: 0, maximum: 999 }, width: { type: "integer", minimum: 1, maximum: 1000 }, height: { type: "integer", minimum: 1, maximum: 1000 } }, required: ["x", "y", "width", "height"] } }, required: ["name", "part", "color", "secondaryColor", "tags", "canLayer", "boundingBox"] } } }, required: ["items"] } } },
     }),
   });
   const result = await response.json().catch(() => ({}));
@@ -413,7 +411,7 @@ export function wardrobeImportApi(options = {}) {
 
   function matchesGeneratedLayering(metadata, generation) {
     const current = normalizeLayering(metadata);
-    return Boolean(generation) && current.isShirt === generation.isShirt && current.canLayer === generation.canLayer;
+    return Boolean(generation) && current.canLayer === generation.canLayer;
   }
 
   function modeledStageImages(job) {
@@ -429,12 +427,12 @@ export function wardrobeImportApi(options = {}) {
     }
     if (!matchesGeneratedLayering(metadata, job.stages.modeled.generationLayering)) {
       // Old one-photo jobs remain reviewable unless a newly chosen wearing mode requires a new batch.
-      if (job.stages.modeled.generationLayering || metadata.isShirt || metadata.canLayer) {
-        throw Object.assign(new Error("Shirt or layering settings changed. Regenerate the modeled photos before approving."), { status: 409 });
+      if (job.stages.modeled.generationLayering || metadata.canLayer) {
+        throw Object.assign(new Error("Layering settings changed. Regenerate the modeled photos before approving."), { status: 409 });
       }
     }
     if (images.length !== expected.length || images.some((image, index) => image.mode !== expected[index])) {
-      throw Object.assign(new Error("Review a complete set of modeled photos for the current shirt settings before approving."), { status: 409 });
+      throw Object.assign(new Error("Review a complete set of modeled photos for the current layering settings before approving."), { status: 409 });
     }
     return images;
   }
@@ -459,7 +457,15 @@ export function wardrobeImportApi(options = {}) {
 
   async function loadJob(id) {
     if (!/^[a-f0-9-]{36}$/i.test(id)) return null;
-    try { return JSON.parse(await readFile(path.join(jobsDir, id, "job.json"), "utf8")); }
+    try {
+      const job = JSON.parse(await readFile(path.join(jobsDir, id, "job.json"), "utf8"));
+      job.metadata = normalizeMetadata(job.metadata);
+      const stage = job.stages.modeled;
+      if (stage.generationLayering) stage.generationLayering = normalizeLayering(stage.generationLayering);
+      if (Array.isArray(stage.images)) stage.images = getModeledImages({ modeledImages: stage.images });
+      if (job.internal?.retainedModeledImages) job.internal.retainedModeledImages = getModeledImages({ modeledImages: job.internal.retainedModeledImages });
+      return job;
+    }
     catch (error) { if (error.code === "ENOENT") return null; throw error; }
   }
 
@@ -469,7 +475,7 @@ export function wardrobeImportApi(options = {}) {
   }
 
   async function loadImported() {
-    try { return JSON.parse(await readFile(importedFile, "utf8")); }
+    try { return JSON.parse(await readFile(importedFile, "utf8")).map(normalizeWardrobeItem); }
     catch (error) { if (error.code === "ENOENT") return []; throw error; }
   }
 
@@ -491,6 +497,11 @@ export function wardrobeImportApi(options = {}) {
       await writeFile(path.join(libraryAssetDir, garmentName), garmentBytes);
       const modeledImages = includeModeled ? [] : getModeledImages(existing);
       for (const image of sourceImages) {
+        const retained = job.internal.retainedLibraryImages?.find((entry) => entry.id === image.id && entry.mode === image.mode);
+        if (retained) {
+          modeledImages.push({ ...image, image: retained.image });
+          continue;
+        }
         const source = path.basename(new URL(image.image, "http://localhost").pathname);
         const bytes = await readFile(path.join(jobsDir, job.id, source));
         const name = `${id}-modeled-${image.mode}-${digest(bytes)}.png`;
@@ -522,12 +533,10 @@ export function wardrobeImportApi(options = {}) {
   function metadataPatch(input) {
     const supplied = input.metadata ?? input;
     if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) throw Object.assign(new Error("metadata must be an object"), { status: 400 });
-    const allowed = ["name", "part", "color", "secondaryColor", "tags", "isShirt", "canLayer", "layeringSource"];
+    const allowed = ["name", "part", "color", "secondaryColor", "tags", "canLayer", "layeringSource"];
     const patch = Object.fromEntries(allowed.filter((key) => Object.hasOwn(supplied, key)).map((key) => [key, supplied[key]]));
     if (!Object.keys(patch).length) throw Object.assign(new Error("No editable metadata fields were supplied"), { status: 400 });
-    for (const key of ["isShirt", "canLayer"]) {
-      if (Object.hasOwn(patch, key) && typeof patch[key] !== "boolean") throw Object.assign(new Error(`${key} must be a boolean`), { status: 400 });
-    }
+    if (Object.hasOwn(patch, "canLayer") && typeof patch.canLayer !== "boolean") throw Object.assign(new Error("canLayer must be a boolean"), { status: 400 });
     if (Object.hasOwn(patch, "layeringSource") && !["ai", "manual"].includes(patch.layeringSource)) throw Object.assign(new Error("layeringSource must be ai or manual"), { status: 400 });
     if (Object.hasOwn(patch, "part") && !PARTS.has(patch.part)) throw Object.assign(new Error("Invalid wardrobe category"), { status: 400 });
     if (Object.hasOwn(patch, "name") && (typeof patch.name !== "string" || !patch.name.trim())) throw Object.assign(new Error("name must be a nonempty string"), { status: 400 });
@@ -539,7 +548,7 @@ export function wardrobeImportApi(options = {}) {
 
   function applyMetadataPatch(existing, changes) {
     const current = normalizeLayering(existing);
-    const changed = ["isShirt", "canLayer"].some((key) => Object.hasOwn(changes, key) && changes[key] !== current[key]);
+    const changed = Object.hasOwn(changes, "canLayer") && changes.canLayer !== current.canLayer;
     const layeringSource = changes.layeringSource === "ai"
       ? "ai"
       : changed ? "manual" : current.layeringSource;
@@ -576,10 +585,7 @@ export function wardrobeImportApi(options = {}) {
       }
       const metadata = normalizeMetadata(record);
       const expected = getExpectedModeledModes(metadata);
-      const accepted = getModeledImages(record).map((image) => ({
-        ...image,
-        mode: image.mode === "default" && metadata.isShirt ? "top" : image.mode,
-      }));
+      const accepted = getModeledImages(record);
       if (expected.every((mode) => accepted.some((image) => image.mode === mode))) {
         throw Object.assign(new Error("This item already has its modeled looks."), { status: 409 });
       }
@@ -616,7 +622,7 @@ export function wardrobeImportApi(options = {}) {
         stages: { crop: { ...approvedStage }, garment: { ...approvedStage }, modeled: { ...stageState(), status: "queued" } },
         createdAt: now, updatedAt: now,
         originalAssetUrl: `${ASSET_ROOT}/${jobId}/original.png`,
-        internal: { originalFile: "original.png", cropFile: "original.png", originalMime: "image/png", requiresExistingRecord: true, libraryGarmentImage: record.image, retainedModeledImages: retained },
+        internal: { originalFile: "original.png", cropFile: "original.png", originalMime: "image/png", requiresExistingRecord: true, libraryGarmentImage: record.image, retainedModeledImages: retained, retainedLibraryImages: accepted.filter((image) => expected.includes(image.mode)) },
       };
       await saveJob(job);
       return { job, reused: false };
@@ -701,7 +707,7 @@ export function wardrobeImportApi(options = {}) {
           if (!fresh) return;
           const metadata = await effectiveMetadata(fresh);
           if (stageName === "modeled" && !matchesGeneratedLayering(metadata, normalizeLayering(current.metadata))) {
-            throw new Error("Shirt or layering settings changed while generating. Regenerate the modeled photos for the new settings.");
+            throw new Error("Layering settings changed while generating. Regenerate the modeled photos for the new settings.");
           }
           fresh.metadata = metadata;
           fresh.stages[stageName].status = "review";
@@ -911,7 +917,7 @@ export function wardrobeImportApi(options = {}) {
           const images = verifyModeledBatch(job, metadata);
           const input = await body(req);
           if (images.length > 1 && (!Array.isArray(input.reviewedImageIds) || images.some((image) => !input.reviewedImageIds.includes(image.id)))) {
-            throw Object.assign(new Error("View both modeled photos before approving this shirt."), { status: 409 });
+            throw Object.assign(new Error("View both modeled photos before approving this item."), { status: 409 });
           }
           job.metadata = metadata;
         }
@@ -977,10 +983,18 @@ export function wardrobeImportApi(options = {}) {
       libraryAssetDir = path.join(dataDir, "imported");
       await mkdir(jobsDir, { recursive: true });
       await mkdir(libraryAssetDir, { recursive: true });
+      await withLibraryLock(async () => {
+        try {
+          const records = JSON.parse(await readFile(importedFile, "utf8"));
+          const normalized = records.map(normalizeWardrobeItem);
+          if (JSON.stringify(records) !== JSON.stringify(normalized)) await atomicJson(importedFile, normalized);
+        } catch (error) { if (error.code !== "ENOENT") throw error; }
+      });
       const ids = await readdir(jobsDir).catch(() => []);
       for (const id of ids) {
         const job = await loadJob(id);
         if (!job) continue;
+        await saveJob(job);
         if (job.status === "complete") {
           try {
             await persistImported(job, true);

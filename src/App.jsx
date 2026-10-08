@@ -3,8 +3,8 @@ import { Check, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { ModeledCarousel } from "./ModeledCarousel.jsx";
-import { ShirtControls } from "./ShirtControls.jsx";
-import { getModeledImages } from "./wardrobe-model.js";
+import { LayeringControls } from "./LayeringControls.jsx";
+import { getExpectedModeledModes, getModeledImages } from "./wardrobe-model.js";
 
 const STORAGE_KEY = "open-wardrobe-edits-v1";
 const DELETED_STORAGE_KEY = "open-wardrobe-deleted-v1";
@@ -39,11 +39,10 @@ function removePersistedEdit(id) {
 }
 
 function itemDraft(item) {
-  const isShirt = item.part === "upperbody" && item.isShirt === true;
   return {
     name: item.name || "", part: item.part, color: item.color || "#9a9286",
     secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])],
-    isShirt, canLayer: isShirt && item.canLayer === true, layeringSource: item.layeringSource || "ai",
+    canLayer: item.canLayer === true, layeringSource: item.layeringSource || "ai",
   };
 }
 
@@ -176,7 +175,7 @@ function GalleryItem({ item, selected, onOpen }) {
         sizes="(max-width: 520px) calc(50vw - 16px), (max-width: 860px) calc(33vw - 18px), 180px"
         breakpoints={[120, 180, 240, 320, 480]}
       />
-      {item.part === "upperbody" && item.isShirt && item.canLayer && <span className="layerable-badge">Layerable</span>}
+      {item.canLayer && <span className="layerable-badge">Layerable</span>}
     </button>
   );
 }
@@ -300,12 +299,12 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
 
       <label className="field">
         <span>Category</span>
-        <select value={draft.part} onChange={(event) => setDraft((current) => ({ ...current, part: event.target.value, ...(event.target.value !== "upperbody" ? { isShirt: false, canLayer: false, layeringSource: "manual" } : {}) }))}>
+        <select value={draft.part} onChange={(event) => setDraft((current) => ({ ...current, part: event.target.value }))}>
           {TYPES.slice(1).map((type) => <option value={type.id} key={type.id}>{type.label}</option>)}
         </select>
       </label>
 
-      <ShirtControls value={draft} onChange={setDraft} disabled={disabled} />
+      <LayeringControls value={draft} onChange={setDraft} disabled={disabled} />
 
       <fieldset className="color-field">
         <legend>Colors</legend>
@@ -360,13 +359,11 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
   const [closeBlocked, setCloseBlocked] = useState(false);
   const type = TYPE_MAP[item.part]?.singular || "Wardrobe item";
   const savedModeledImages = getModeledImages(item);
-  const topImage = savedModeledImages.find((image) => image.mode === "top")
-    || savedModeledImages.find((image) => image.mode === "default");
-  const layerImage = item.part === "upperbody" && item.isShirt && item.canLayer
-    ? savedModeledImages.find((image) => image.mode === "layer") : null;
-  const modeledImages = [topImage, layerImage].filter(Boolean);
+  const expectedModes = getExpectedModeledModes(item);
+  const defaultImage = savedModeledImages.find((image) => image.mode === "default");
+  const modeledImages = expectedModes.map((mode) => savedModeledImages.find((image) => image.mode === mode)).filter(Boolean);
   const hasModeledImage = modeledImages.length > 0;
-  const canCreateLayerLook = item.part === "upperbody" && item.isShirt && item.canLayer && !layerImage;
+  const canCreateModeledLooks = expectedModes.some((mode) => !savedModeledImages.some((image) => image.mode === mode));
   const pending = saving || creatingModeled;
   const pieceRotation = useMemo(() => {
     const hash = [...item.id].reduce((total, character) => total + character.charCodeAt(0), 0);
@@ -381,14 +378,14 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
       color: draft.color?.toLowerCase() || null,
       secondaryColor: draft.secondaryColor?.toLowerCase() || null,
       tags: normalizedTags(draft.tags),
-      isShirt: draft.isShirt, canLayer: draft.canLayer, layeringSource: draft.layeringSource,
+      canLayer: draft.canLayer, layeringSource: draft.layeringSource,
     }) !== JSON.stringify({
       name: (item.name || "").trim(),
       part: item.part,
       color: item.color?.toLowerCase() || null,
       secondaryColor: item.secondaryColor?.toLowerCase() || null,
       tags: normalizedTags(item.tags || []),
-      isShirt: itemDraft(item).isShirt, canLayer: itemDraft(item).canLayer, layeringSource: itemDraft(item).layeringSource,
+      canLayer: itemDraft(item).canLayer, layeringSource: itemDraft(item).layeringSource,
     });
   }, [draft, item]);
 
@@ -460,7 +457,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
   };
 
   const createModeledLooks = async () => {
-    if (pending || isDirty || !canCreateLayerLook) return;
+    if (pending || isDirty || !canCreateModeledLooks) return;
     setCreatingModeled(true);
     setModeledError("");
     setSampling(null);
@@ -558,11 +555,11 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
         />
         </fieldset>
 
-        {canCreateLayerLook && <div className="create-modeled-look">
+        {canCreateModeledLooks && <div className="create-modeled-look">
           <button className="secondary-button" type="button" disabled={pending || isDirty} onClick={createModeledLooks}>
-            {creatingModeled ? "Preparing looks…" : topImage ? "Create layer look" : "Create modeled looks"}
+            {creatingModeled ? "Preparing looks…" : defaultImage ? "Create layer look" : "Create modeled looks"}
           </button>
-          <p>{isDirty ? "Save your changes first." : topImage ? "Add an open-shirt look over an inner top." : "Create a closed top look and an open layer look."}</p>
+          <p>{isDirty ? "Save your changes first." : defaultImage ? "Add a thoughtfully styled look over a compatible inner piece." : item.canLayer ? "Create one styled look and one layered look." : "Create one styled look for this piece."}</p>
         </div>}
 
         {closeBlocked && <p className="unsaved-notice" role="status">Save or cancel changes before closing.</p>}
