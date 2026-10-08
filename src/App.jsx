@@ -4,6 +4,8 @@ import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { ModeledCarousel } from "./ModeledCarousel.jsx";
 import { LayeringControls } from "./LayeringControls.jsx";
+import { PhotoActions, PromptCalibrationControl, usePhotoCollection } from "./PhotoActions.jsx";
+import { OutfitGallery } from "./OutfitGallery.jsx";
 import { getExpectedModeledModes, getModeledImages } from "./wardrobe-model.js";
 
 const STORAGE_KEY = "open-wardrobe-edits-v1";
@@ -357,11 +359,21 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
   const [modeledError, setModeledError] = useState("");
   const [shaking, setShaking] = useState(false);
   const [closeBlocked, setCloseBlocked] = useState(false);
+  const photoCollection = usePhotoCollection("item", item.id);
+  const [activePhotoMode, setActivePhotoMode] = useState("default");
+  const [loadedPhotoImage, setLoadedPhotoImage] = useState(null);
+  const trackActivePhoto = useCallback((image) => setActivePhotoMode(image.mode), []);
+  const trackLoadedPhoto = useCallback((_id, image) => setLoadedPhotoImage(image.image), []);
   const type = TYPE_MAP[item.part]?.singular || "Wardrobe item";
   const savedModeledImages = getModeledImages(item);
   const expectedModes = getExpectedModeledModes(item);
   const defaultImage = savedModeledImages.find((image) => image.mode === "default");
-  const modeledImages = expectedModes.map((mode) => savedModeledImages.find((image) => image.mode === mode)).filter(Boolean);
+  const modeledImages = expectedModes.map((mode) => {
+    const currentPhoto = photoCollection.photos.find((photo) => photo.mode === mode);
+    const savedImage = savedModeledImages.find((image) => image.mode === mode);
+    return currentPhoto?.image ? { id: `modeled-${mode}`, mode, image: currentPhoto.image } : savedImage ? { ...savedImage, id: `modeled-${mode}` } : null;
+  }).filter(Boolean);
+  const activePhoto = photoCollection.photos.find((photo) => photo.mode === activePhotoMode);
   const hasModeledImage = modeledImages.length > 0;
   const canCreateModeledLooks = expectedModes.some((mode) => !savedModeledImages.some((image) => image.mode === mode));
   const pending = saving || creatingModeled;
@@ -408,6 +420,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === "Escape") {
+        if (document.querySelector(".photo-dialog[open]")) return;
         if (sampling) setSampling(null);
         else requestClose();
       }
@@ -521,6 +534,8 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
             label={draft.name || type}
             className="modeled-carousel--hero"
             imageClassName="modeled-hero-photo"
+            onActiveImageChange={trackActivePhoto}
+            onImageViewed={trackLoadedPhoto}
             imageProps={{ sizes: "(max-width: 860px) 100vw, 520px", breakpoints: [320, 480, 640, 800, 1040, 1280], quality: 82, priority: true }}
           />
           {garmentArtwork}
@@ -530,6 +545,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
               <h2>{draft.name || TYPE_MAP[draft.part]?.singular}</h2>
             </div>
           </div>
+          <div className="viewer-photo-actions"><PhotoActions collection={photoCollection} photo={activePhoto} disabled={pending || isDirty || activePhoto?.image !== loadedPhotoImage} disabledReason={isDirty ? "Save your item changes before rating or regenerating a photo." : activePhoto && activePhoto.image !== loadedPhotoImage ? "Loading photo…" : ""} /></div>
         </>
       ) : (
         <>
@@ -590,6 +606,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [requestedJob, setRequestedJob] = useState(null);
+  const [collectionTab, setCollectionTab] = useState("wardrobe");
 
   useEffect(() => {
     fetch("/api/import/wardrobe", { cache: "no-store" })
@@ -679,6 +696,13 @@ export function App() {
     <div className={`app-shell${selectedItem ? " has-selection" : ""}`}>
       <main className="gallery-pane">
         <header className="gallery-header">
+          <div className="collection-toolbar">
+            <nav className="collection-nav" aria-label="Choose collection">
+              {[{ id: "wardrobe", label: "Wardrobe" }, { id: "outfits", label: "Outfits" }].map((tab) => <button key={tab.id} type="button" className={collectionTab === tab.id ? "active" : ""} aria-pressed={collectionTab === tab.id} onClick={() => { setCollectionTab(tab.id); setSelectedId(null); }}>{tab.label}</button>)}
+            </nav>
+            <PromptCalibrationControl />
+          </div>
+          {collectionTab === "wardrobe" && <>
           <div className="gallery-meta-row">
             <p className="piece-count">{items.length} {items.length === 1 ? "piece" : "pieces"}</p>
           </div>
@@ -695,8 +719,10 @@ export function App() {
               </button>
             ))}
           </nav>
+          </>}
         </header>
 
+        {collectionTab === "outfits" ? <OutfitGallery /> : <>
         {error && <p className="status error">{error}</p>}
         {!error && loading && <p className="status">Loading wardrobe</p>}
         {!error && !loading && !items.length && <p className="status empty">Drop, paste, or add a photo to import your first piece.</p>}
@@ -713,6 +739,7 @@ export function App() {
             ))}
           </section>
         )}
+        </>}
       </main>
 
       {selectedItem && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onCreateModeled={createModeledLooks} />}

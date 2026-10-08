@@ -31,20 +31,29 @@ Open [localhost:5173](http://localhost:5173).
 
 ## Import with Codex
 
-This repo includes two Codex skills: one imports clothes and generates modeled item photos; the other styles complete outfits and generates a modeled lookbook.
+This repo includes Codex skills to import clothes, generate complete outfits, and calibrate generation guidance from your image feedback.
 
 ```text
 $import-clothes Import the clothes from ~/Pictures/outfits, create modeled photos, and add them to this wardrobe.
 $generate-outfits Create modeled outfit ideas from my wardrobe.
+$calibrate-outfit-prompts Review my outfit image feedback and improve the generation guidance.
 ```
 
-Open the cloned repo in Codex and run either prompt. The import skill asks for a local model-reference PNG when needed, reviews every cutout and modeled photo, then writes to `data/library.json` and `data/imported/`. The outfit skill asks how many looks to create, then curates, generates, verifies, and saves the complete collection under `data/`.
+Open the cloned repo in Codex and run a prompt. The import skill asks for a local model-reference PNG when needed, reviews every cutout and modeled photo, then writes to `data/library.json` and `data/imported/`. The outfit skill asks how many looks to create, then curates, generates, verifies, and saves the complete collection under `data/`.
 
 The original **Tops, Jackets, Bottoms, Accessories and Shoes** categories stay unchanged. AI prepopulates **Can wear as a layer** independently of category during import, using the piece’s construction, weight and fit. Casual flannels, textured shirts and zip-up jackets can qualify; uncertain cases default to false. You can edit this choice, and saved manual choices take precedence on reimport. When modeled previews are requested, a layerable piece gets exactly two images—its normal presentation and a layered look—and other pieces get one. Hover over the side-panel photo to reveal arrows, or use the focused carousel's keyboard controls, to browse the pair. Each physical piece still counts as one wardrobe item.
 
 For an existing piece with one accepted modeled photo, save **Can wear as a layer**, then choose **Create layer look**. Wardrobe keeps the accepted normal photo and generates only the missing layered view for review, without reimporting the piece.
 
 Complete outfits use thoughtful menswear styling: fit, proportion, color, texture and occasion guide the choice of actual wardrobe inner pieces, including T-shirts or hoodies when appropriate.
+
+### Regenerate and give feedback
+
+Modeled clothing previews and complete outfits support **Regenerate** and image-specific thumbs up/down with a comment. After a successful regeneration, **Undo** remains available for one minute, including after a page reload. Reverting restores the previous image without deleting the new version. Every generated version and its available prompt/context stay in `data/photo-history/`, alongside ratings, comments, regeneration and undo events.
+
+Use [$calibrate-outfit-prompts](.agents/skills/calibrate-outfit-prompts/SKILL.md) to review those local comparisons and save learned preferences for future generations. Explicit ratings carry more weight than the weaker signal of choosing to regenerate or undo. Calibration supplements the original prompts while preserving identity, exact garments, user model direction and generation counts; it does not fine-tune a model or trigger new paid images automatically. Ask the skill to **restore default prompts** to deactivate learned guidance while keeping the complete revision and image history.
+
+For a direct local reset, run `node scripts/calibrate-outfit-prompts.mjs --reset`. The same script supports `--show`, `--export <new-file.json>` and `--apply <draft.json>`, with optional `--data <directory>` for a configured data location.
 
 ### For agents
 
@@ -77,7 +86,7 @@ If `model-reference-2.png` and `model-reference-3.png` are beside the primary re
 
 ## Testing
 
-Run `npm test` for integration checks and `npm run check` for the production build. Run `npm run e2e:serve` for a browser test using anonymous fixtures, a local provider, and isolated temporary storage. See [the browser verification report](docs/e2e-verification.md) for reproducible steps, observed results, and screenshots.
+Run `npm test` for integration checks and `npm run check` for the production build. Run `npm run e2e:serve` for a browser test using anonymous fixtures, a local provider, and isolated temporary storage. See the [layering report](docs/e2e-verification.md) and [photo feedback and regeneration report](docs/photo-feedback-e2e.md) for reproducible steps, observed results, and screenshots.
 
 ## License
 

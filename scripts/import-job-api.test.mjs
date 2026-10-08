@@ -55,7 +55,7 @@ async function fixture(t, detected = [item()], seed = []) {
   const source = await png(80, 100);
   await writeFile(path.join(dataDir, "model-reference.png"), source);
   await writeFile(path.join(dataDir, "library.json"), JSON.stringify(seed));
-  const state = { analysis: [], edits: [], failMode: null, providerErrors: [], modelGate: null };
+  const state = { analysis: [], edits: [], failMode: null, undecodableMode: null, providerErrors: [], modelGate: null };
   const provider = createServer(async (req, res) => {
     try {
       assert.equal(req.headers.authorization, "Bearer wardrobe-test-only");
@@ -92,6 +92,8 @@ async function fixture(t, detected = [item()], seed = []) {
         // Unique content lets the test verify cache-safe content-versioned URLs.
         output = await png(96, 64, { r: 90 + state.edits.length, g: 110, b: 120, alpha: 1 });
       }
+      if (mode === state.undecodableMode) output = Buffer.from("Returned modeled output that cannot be decoded as an image");
+      state.edits.at(-1).output = output;
       return respond(res, 200, { data: [{ b64_json: output.toString("base64") }] });
     } catch (error) {
       state.providerErrors.push(error);
@@ -318,6 +320,38 @@ test("a second-photo failure cannot publish an incomplete pair, and retry regene
   assert.deepEqual(f.state.edits.filter((edit) => edit.mode !== "garment").map((edit) => edit.mode), ["default", "layer", "default", "layer"]);
   assert.equal((await f.approveModeled(review)).status, 200);
   assert.equal((await f.library())[0].modeledImages.length, 2);
+});
+
+test("undecodable modeled import output is retained as invalid without replacing the garment", async (t) => {
+  const f = await fixture(t, [item({ canLayer: false })]);
+  const [job] = await f.upload();
+  await f.garmentReview(job);
+  f.state.undecodableMode = "default";
+  assert.equal((await f.request(`/api/import/jobs/${job.id}/stages/garment/approve`, "POST", {})).status, 200);
+  const failed = await f.waitFor(job.id, "modeled", "failed");
+  assert.ok(failed.stages.modeled.error);
+  const [record] = await f.library();
+  assert.deepEqual(record.modeledImages, [], "an invalid attempt must not become a wardrobe preview");
+  const garmentBefore = Buffer.from(await (await fetch(`${f.url}${record.image}`)).arrayBuffer());
+  const history = JSON.parse(await readFile(path.join(f.dataDir, "photo-history", "index.json"), "utf8"));
+  const target = history.targets.find((entry) => entry.kind === "item" && entry.targetId === record.id && entry.mode === "default");
+  assert.ok(target, "every returned modeled attempt has a history target");
+  const invalid = target.versions.find((version) => version.status === "invalid");
+  assert.ok(invalid, "undecodable provider output is archived rather than discarded");
+  assert.equal(invalid.prompt, f.state.edits.find((edit) => edit.mode === "default").prompt.replaceAll("\r\n", "\n"), "multipart transport may normalize line endings, but the full prompt remains recorded");
+  const archivedResponse = await fetch(`${f.url}${invalid.image}`);
+  assert.equal(archivedResponse.status, 200);
+  assert.deepEqual(Buffer.from(await archivedResponse.arrayBuffer()), f.state.edits.find((edit) => edit.mode === "default").output, "history preserves the exact returned invalid bytes");
+  f.state.undecodableMode = null;
+  assert.equal((await f.request(`/api/import/jobs/${job.id}/stages/modeled/regenerate`, "POST", {})).status, 202);
+  const review = await f.waitFor(job.id, "modeled", "review");
+  assert.equal((await f.approveModeled(review)).status, 200);
+  const [accepted] = await f.library();
+  assert.equal(accepted.id, record.id);
+  assert.equal(accepted.image, record.image);
+  assert.deepEqual(Buffer.from(await (await fetch(`${f.url}${accepted.image}`)).arrayBuffer()), garmentBefore);
+  const retained = JSON.parse(await readFile(path.join(f.dataDir, "photo-history", "index.json"), "utf8"));
+  assert.ok(retained.targets.flatMap((entry) => entry.versions).some((version) => version.id === invalid.id), "a successful retry keeps the earlier invalid attempt");
 });
 
 test("changing layer eligibility makes old photos unapprovable until the correct set is regenerated", async (t) => {

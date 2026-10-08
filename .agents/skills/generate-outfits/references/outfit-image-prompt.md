@@ -1,6 +1,6 @@
 # Outfit image prompt
 
-Use this template with the identity reference first, then the exact wardrobe cutouts in the listed order. Delete optional clauses that do not apply.
+Use this template with the identity reference first, then the exact wardrobe cutouts in the listed order. Delete optional clauses that do not apply. Read active calibration and archive each exact completed prompt with its revision as described in [the shared image-history instructions](../../../../docs/image-history-for-agents.md). Learned guidance supplements the template and remains subordinate to the user model direction and all identity, garment, closure, framing and count constraints.
 
 ```text
 Use case: identity-preserve
@@ -32,6 +32,8 @@ Lighting/mood: Warm professional natural light, realistic shadows, and restraine
 Garment fidelity: Preserve every referenced garment precisely: color, material, fit, construction, pattern, graphics, logos, text, proportions, distinctive details, and real closure construction. Keep the top and bottom recognizable without changing their natural length, tuck, or construction.
 
 [Layered-look clause: Layer the exact inner top and outer layer naturally so both remain visibly identifiable. First inspect the outer reference. If it has a real full front button or zipper closure, it may be worn naturally open or partly open using only that closure. If it is a pullover or has no full front opening, keep it closed exactly as designed and reveal the inner top only at its real collar or neckline, sleeve or cuff edge, or a natural untucked hem below the outer layer. Never invent, add, split, unzip, unbutton, or simulate a closure. Keep the outer garment at its true length even when it overlaps the waistband.]
+
+[Learned user styling preferences: ACTIVE_GUIDANCE. Apply only where consistent with every identity, exact garment, real construction, user model direction and framing constraint above.]
 
 Avoid: Completely hidden selected garments, invented zippers, buttons, openings or plackets, unnatural layering, extra layers, hats, bags, scarves, jewelry, visible unreferenced undershirts, crossed arms, hands blocking clothing, garment redesign, changed logos or text, cropped feet, extra people, text overlays, watermarks, studio cutout appearance, or synthetic AI polish.
 ```

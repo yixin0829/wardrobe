@@ -4,14 +4,17 @@ import { OptimizedImage } from "./OptimizedImage.jsx";
 
 const MODE_LABELS = { layer: "Layered look", default: "Styled look" };
 
-export function ModeledCarousel({ images, label, className = "", imageClassName = "", imageProps = {}, onImageViewed }) {
+export function ModeledCarousel({ images, label, className = "", imageClassName = "", imageProps = {}, onImageViewed, onActiveImageChange }) {
   const [index, setIndex] = useState(0);
-  const imageKey = images.map((entry) => `${entry.id}:${entry.image}`).join("|");
+  const imageKey = images.map((entry) => `${entry.id}:${entry.mode}`).join("|");
   useEffect(() => setIndex(0), [imageKey]);
-  if (!images.length) return null;
-
   const activeIndex = Math.min(index, images.length - 1);
   const active = images[activeIndex];
+  useEffect(() => {
+    if (active) onActiveImageChange?.({ id: active.id, mode: active.mode, image: active.image });
+  }, [active?.id, active?.mode, active?.image, onActiveImageChange]);
+  if (!active) return null;
+
   const multiple = images.length > 1;
   const move = (direction) => setIndex((current) => (current + direction + images.length) % images.length);
 
@@ -38,7 +41,7 @@ export function ModeledCarousel({ images, label, className = "", imageClassName 
         alt={`${label}: ${MODE_LABELS[active.mode] || MODE_LABELS.default}`}
         onLoad={(event) => {
           imageProps.onLoad?.(event);
-          if (event.currentTarget.naturalWidth > 0) onImageViewed?.(active.id);
+          if (event.currentTarget.naturalWidth > 0) onImageViewed?.(active.id, active);
         }}
       />
       {multiple && <>

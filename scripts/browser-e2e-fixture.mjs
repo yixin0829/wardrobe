@@ -55,7 +55,7 @@ const tee = `<path d="M168 132L218 105Q256 146 294 105L344 132L405 228L357 267L3
 const jacket = `<path d="M170 98L224 78H288L342 98L422 260L371 288L331 211V537H181V211L141 288L90 260Z" fill="#60765d" stroke="#344831" stroke-width="4"/><path d="M224 78L239 125H273L288 78M256 125V537" fill="none" stroke="#d5cdbb" stroke-width="7"/><path d="M194 359L231 345M281 345L318 359" stroke="#d5cdbb" stroke-width="5"/><path d="M181 515H331M106 252L142 275M370 275L406 252" stroke="#344831" stroke-width="12"/>`;
 const trousers = (color, margin = 0) => `<g transform="translate(0 ${margin})"><path d="M177 72H335L342 303L323 556H267L256 298L245 556H189L170 303Z" fill="${color}" stroke="#5b5e62" stroke-width="3"/><path d="M177 103H335M256 75V193M188 112Q188 158 218 161M324 112Q324 158 294 161" fill="none" stroke="#c4baa9" stroke-width="3"/></g>`;
 
-function modeled(mode, name) {
+function modeled(mode, name, generation = 0, square = false) {
   const layer = mode === "layer";
   const flannel = /flannel/i.test(name);
   const isJacket = /jacket/i.test(name);
@@ -64,7 +64,7 @@ function modeled(mode, name) {
   const torso = layer
     ? `${innerTop}<path d="M312 138L342 131L335 288L307 275L306 185L287 243L271 236Z" fill="${color}"/><path d="M382 131L412 138L452 236L435 243L416 185L417 275L389 288Z" fill="${color}"/>`
     : `<path d="M312 138L342 131H382L412 138L452 236L435 243L410 185L413 282H310L314 185L289 243L272 236Z" fill="${color}"/><path d="M342 131L362 152L382 131" fill="none" stroke="#264254" stroke-width="3"/><path d="M362 152V282" stroke="#2a4658" stroke-width="2"/>${[170, 194, 218, 242, 266].map((y) => `<circle cx="362" cy="${y}" r="2.2" fill="#efe6d5"/>`).join("")}`;
-  return frame(`
+  const composition = `
     <rect x="32" y="30" width="215" height="360" rx="6" fill="#d9c9b5"/>
     <rect x="44" y="42" width="192" height="235" rx="88" fill="#b9b6a3"/>
     <path d="M0 348H720V480H0Z" fill="#c5b397"/>
@@ -77,7 +77,9 @@ function modeled(mode, name) {
     ${torso}
     ${flannel ? `<path d="${layer ? "M315 158L334 163M311 182L332 189M311 208L330 214M390 163L411 158M392 189L416 182M395 214L418 208" : "M309 170H415M309 196H417M308 222H416M309 248H414M332 144V282M389 144V282"}" fill="none" stroke="#8aa0ac" stroke-width="5" opacity=".8"/>` : ""}
     <path d="M273 235L265 258M450 235L459 258" stroke="#c0aa8a" stroke-width="13" stroke-linecap="round"/>
-  `, "#ede6db", 720, 480);
+    <circle cx="${664 - (generation % 4) * 17}" cy="43" r="${8 + generation % 5}" fill="${generation % 2 ? "#91a28c" : "#a99883"}"/>
+  `;
+  return frame(square ? `<g transform="translate(0 104)">${composition}</g>` : composition, "#ede6db", 720, square ? 720 : 480);
 }
 
 try {
@@ -87,6 +89,7 @@ try {
   const sources = [frame(shirt("#436377", true), "#ebf0f4"), frame(tee, "#f5eee7"), frame(shirt("#d2dfdc"), "#edf1ef"), frame(jacket, "#e4ece3")];
   await Promise.all(sources.map(async (svg, index) => writeFile(path.join(fixtureDir, fixtureNames[index]), await png(svg))));
   await writeFile(path.join(dataDir, "model-reference.png"), await png(frame(`<circle cx="256" cy="182" r="63" fill="#c0aa8a"/><path d="M140 510V360Q256 253 372 360V510Z" fill="#606d73"/>`, "#ebe6dd")));
+  await writeFile(path.join(dataDir, "model-reference-2.png"), await png(frame(`<circle cx="256" cy="105" r="35" fill="#c0aa8a"/><path d="M211 140H301V340H211Z" fill="#61796a"/><path d="M213 340H251V591H213ZM263 340H301V591H263Z" fill="#474f55"/>`, "#ebe6dd")));
   try { await readFile(path.join(dataDir, "library.json")); }
   catch (error) {
     if (error.code !== "ENOENT") throw error;
@@ -99,6 +102,18 @@ try {
     }
     await writeFile(path.join(dataDir, "library.json"), JSON.stringify(seeds, null, 2));
   }
+  const topId = "import-33333333-1111-4111-8111-111111111111";
+  const topFile = `${topId}-synthetic.png`;
+  const topModeledFile = `${topId}-modeled-synthetic.png`;
+  await writeFile(path.join(dataDir, "imported", topFile), await png(frame(tee, null)));
+  await writeFile(path.join(dataDir, "imported", topModeledFile), await png(modeled("default", "Rust Cotton Tee")));
+  const library = JSON.parse(await readFile(path.join(dataDir, "library.json"), "utf8"));
+  library.push({ id: topId, name: "Rust Cotton Tee", part: "upperbody", color: "#b56543", tags: ["cotton", "synthetic fixture"], canLayer: false, image: `/api/import/library/${topFile}`, thumbnail: `/api/import/library/${topFile}`, modeledImage: `/api/import/library/${topModeledFile}`, modeledImages: [{ id: "modeled-default", mode: "default", image: `/api/import/library/${topModeledFile}` }] });
+  await writeFile(path.join(dataDir, "library.json"), JSON.stringify(library, null, 2));
+  await mkdir(path.join(dataDir, "outfit-images"), { recursive: true });
+  const outfitId = "rust-and-indigo";
+  await writeFile(path.join(dataDir, "outfit-images", `${outfitId}.png`), await png(modeled("default", "Rust Cotton Tee", 0, true)));
+  await writeFile(path.join(dataDir, "outfits.json"), JSON.stringify({ version: 1, outfits: [{ id: outfitId, name: "Rust & Indigo", occasion: ["casual"], setting: "a quiet warm-stone courtyard", garmentIds: [topId, library[0].id], garmentModes: [{ garmentId: topId, role: "top", mode: "default" }, { garmentId: library[0].id, role: "bottom", mode: "default" }], reason: "Warm rust balances dark indigo for an easy everyday outfit.", image: `outfit-images/${outfitId}.png`, status: "accepted" }] }, null, 2));
   function respond(res, status, value) {
     res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     res.end(JSON.stringify(value));
@@ -127,7 +142,8 @@ try {
       for (const file of files) {
         if ((await sharp(Buffer.from(await file.arrayBuffer())).metadata()).format !== "png") throw new Error("Expected PNG references");
       }
-      const mode = form.get("size") === "1024x1024" ? "garment" : /Use the featured garment as an OUTER LAYER/i.test(prompt) ? "layer" : "default";
+      const isOutfit = form.get("size") === "1024x1024" && /square outfit|complete outfit|full outfit/i.test(prompt);
+      const mode = isOutfit ? "outfit" : form.get("size") === "1024x1024" ? "garment" : /Use the featured garment as an OUTER LAYER/i.test(prompt) ? "layer" : "default";
       const name = /Olive Zip Jacket/.test(prompt) ? "Olive Zip Jacket" : /Blue Flannel Shirt/.test(prompt) ? "Blue Flannel Shirt" : /Rust Cotton Tee/.test(prompt) ? "Rust Cotton Tee" : "Formal Dress Shirt";
       state.edits.push({ mode, name, referenceCount: files.length, size: form.get("size"), thoughtfullyStyledInnerLayer: mode === "layer" && /T-shirt/i.test(prompt) && /hoodie/i.test(prompt) && /experienced.*menswear|menswear.*experienced/i.test(prompt) });
       let output;
@@ -136,7 +152,7 @@ try {
         if (!key) throw new Error("No source chroma key");
         const body = /jacket/i.test(name) ? jacket : /flannel/i.test(name) ? shirt("#436377", true) : /tee/i.test(name) ? tee : shirt("#d2dfdc");
         output = await png(frame(body, key));
-      } else output = await png(modeled(mode, name));
+      } else output = await png(modeled(mode, name, state.edits.length, isOutfit));
       return respond(res, 200, { data: [{ b64_json: output.toString("base64") }] });
     } catch (error) {
       state.errors.push(error.message);
@@ -161,7 +177,9 @@ try {
       const library = JSON.parse(await readFile(path.join(dataDir, "library.json"), "utf8"));
       const ids = await readdir(path.join(dataDir, "jobs")).catch(() => []);
       const jobs = await Promise.all(ids.map(async (id) => JSON.parse(await readFile(path.join(dataDir, "jobs", id, "job.json"), "utf8"))));
-      return respond(res, 200, { ...state, counts: { analysis: state.analysis.length, garment: state.edits.filter((e) => e.mode === "garment").length, modeled: state.edits.filter((e) => e.mode !== "garment").length }, library, jobs: jobs.map(({ internal, ...job }) => job) });
+      const outfits = JSON.parse(await readFile(path.join(dataDir, "outfits.json"), "utf8"));
+      const history = await readFile(path.join(dataDir, "photo-history", "index.json"), "utf8").then(JSON.parse).catch((error) => { if (error.code === "ENOENT") return null; throw error; });
+      return respond(res, 200, { ...state, counts: { analysis: state.analysis.length, garment: state.edits.filter((e) => e.mode === "garment").length, modeled: state.edits.filter((e) => e.mode !== "garment").length, outfit: state.edits.filter((e) => e.mode === "outfit").length }, library, outfits, history, jobs: jobs.map(({ internal, ...job }) => job) });
     });
   } };
   vite = await createVite({ configFile: false, root: repo, envDir: work, publicDir: path.join(repo, "public"), plugins: [react(), statusPlugin, wardrobeImportApi({ env })], server: { host: "127.0.0.1", port: 5175, strictPort: true }, optimizeDeps: { include: ["react", "react-dom/client"] } });

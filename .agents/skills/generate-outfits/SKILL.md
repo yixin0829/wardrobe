@@ -5,7 +5,7 @@ description: Curate complete outfits from the local Wardrobe database and genera
 
 # Generate Outfits
 
-Create a complete local outfit collection from `data/library.json`: select strong combinations, generate a square modeled image for each, verify every result, and save the finished manifest and images under `data/`.
+Create a complete local outfit collection: select strong combinations, generate a square modeled image for each, verify every result, and save the finished manifest and images in the configured local wardrobe directory.
 
 ## Begin with the count
 
@@ -20,9 +20,9 @@ Do the workflow end to end after receiving the count. Do not stop after returnin
 ## Requirements
 
 - Read and follow the built-in `imagegen` skill before generating images.
-- Require `data/library.json`, enough tops and bottoms for the requested count, and a local identity reference at `data/model-reference.png` or `WARDROBE_MODEL_REFERENCE`.
+- Resolve `$DATA` using [the shared directory instructions](../../../docs/image-history-for-agents.md#wardrobe-directory). Require `$DATA/library.json`, enough tops and bottoms for the requested count, and a local identity reference at `data/model-reference.png` or `WARDROBE_MODEL_REFERENCE`.
 - Keep every source garment and identity image local and unchanged.
-- Never add `data/`, the identity reference, garment images, or generated photos to Git.
+- Keep `$DATA`, the identity reference, garment images, and generated photos out of Git.
 - Use only wardrobe items that exist in the current database and whose local assets resolve successfully.
 - Generate exactly the requested number of unique outfits and exactly one accepted modeled photo for each.
 
@@ -34,7 +34,7 @@ Assign each worker a disjoint set of outfit IDs plus the exact identity and garm
 
 ## 1. Inspect the wardrobe
 
-Read `data/library.json`. Resolve `/api/import/library/FILENAME` assets to `data/imported/FILENAME`. Group items by:
+Read `$DATA/library.json`. Resolve `/api/import/library/FILENAME` assets to `$DATA/imported/FILENAME`. Group items by:
 
 - `upperbody` — tops
 - `wholebody_up` — jackets and outer layers
@@ -49,6 +49,8 @@ Create checkerboard contact sheets of at most 12 garment cutouts and inspect the
 If the wardrobe cannot support the requested number of genuinely distinct outfits, tell the user the maximum useful count and ask whether to continue with that number.
 
 ## 2. Curate the combinations
+
+Read active calibration with `node scripts/calibrate-outfit-prompts.mjs --data "$DATA" --show` before selecting combinations. Apply supported learned styling preferences to wardrobe pairing where they fit the exact available garments and the user's current direction. Retain this guidance and its revision ID for the batch's image prompts; regeneration of an existing outfit keeps its exact selected pieces.
 
 Each outfit must contain exactly one inner or standalone top and one bottom, with an optional suitable outer layer, shoes and restrained accessory. Style with the judgment of an experienced menswear stylist: choose combinations for their fit, proportion, color, texture and occasion. The aim is fashionable, well-balanced layering.
 
@@ -100,9 +102,9 @@ Create one generation package per outfit:
 4. Optional exact outer layer
 5. Optional exact shoes or accessory only when deliberately selected
 
-The primary identity reference controls the face. If present, include `data/model-reference-2.png` and `data/model-reference-3.png` for body proportions and apply the user's current model direction or configured `WARDROBE_MODEL_DIRECTION`. Otherwise preserve the identity proportions. When the tool's reference limit requires it, make a temporary labeled identity board with the untouched face and body references; keep every selected garment reference in the generation package.
+The primary identity reference controls the face. If present, include `model-reference-2.png` and `model-reference-3.png` beside it for body proportions and apply the user's current model direction or configured `WARDROBE_MODEL_DIRECTION`. Otherwise preserve the identity proportions. When the tool's reference limit requires it, make a temporary labeled identity board with the untouched face and body references; keep every selected garment reference in the generation package.
 
-Read [references/outfit-image-prompt.md](references/outfit-image-prompt.md) and fill its template from the exact outfit record. Inspect every outer-layer reference before choosing the layered clause; never infer a zipper, buttons, placket, opening, or closure.
+Read [references/outfit-image-prompt.md](references/outfit-image-prompt.md) and fill its template from the exact outfit record. Follow [the shared image-history instructions](../../../docs/image-history-for-agents.md) to append the batch's active guidance, record the exact prompt/revision/context, and retain every generated attempt. Inspect every outer-layer reference before choosing the layered clause; never infer a zipper, buttons, placket, opening, or closure.
 
 Use the recorded garment roles/modes explicitly: `default` is the normal presentation; `layer` places the piece over the exact selected inner top, keeping both visibly identifiable. A real button or zip opening may be open or partly open; pullovers remain closed. Keep true garment lengths, proportions and construction.
 
@@ -110,7 +112,7 @@ Rotate restrained warm, natural settings across the collection while keeping one
 
 ## 4. Generate every outfit
 
-Create one square 1:1 modeled PNG per outfit with Imagegen. Save working outputs outside `data/` until they pass review. Use the smallest valid set of references for each call and never omit a selected garment.
+Create one square 1:1 modeled PNG per outfit with Imagegen. Save each attempt to a fresh working filename outside `$DATA`; archive returned rejected or invalid images with their prompt/context before correcting them. Keep failed attempts inactive, and archive accepted outputs at delivery. Use the smallest valid set of references for each call and never omit a selected garment.
 
 Generate in bounded batches when the collection is large. Track every outfit as `planned`, `generated`, `accepted`, or `failed`; resume only missing or failed IDs.
 
@@ -135,13 +137,12 @@ Regenerate identity drift, missing or redesigned garments, fake closures or text
 
 After all requested outfits pass:
 
-1. Create `data/outfit-images/` if needed.
-2. Copy each accepted PNG to `data/outfit-images/OUTFIT-ID.png`.
-3. Set every accepted manifest image to `/api/import/outfits/OUTFIT-ID.png` only if the app exposes that endpoint; otherwise keep the repository-relative `outfit-images/OUTFIT-ID.png` path.
-4. Atomically write the exact requested collection to `data/outfits.json`.
-5. Reopen every copied file and verify that the count of images, unique outfit IDs, and accepted manifest records all equal the number the user requested.
+1. Archive every accepted outfit with `scripts/archive-modeled-photos.mjs`, `kind: "outfit"`, its stable outfit ID, `mode: "default"`, the exact prompt/revision/context and `activate: true`, following [the shared image-history instructions](../../../docs/image-history-for-agents.md). The CLI preserves existing legacy current photos first.
+2. Set each accepted outfit's `image` to the immutable `/api/import/photo-history/...png` URL returned for that attempt. Do not overwrite or delete an earlier outfit image.
+3. Atomically write the exact requested current collection to `$DATA/outfits.json` under the shared library lock. All old versions and their feedback remain in the separate history ledger.
+4. Reopen every archived current PNG and verify that current unique outfit IDs, accepted manifest records and requested count agree. Also verify failed attempts remain inactive.
 
-Do not claim the current gallery displays outfits unless the app has an outfit route. The completed local assets and manifest are still the deliverable.
+Verify the outfit view after the manifest change. The current collection supports per-image regeneration and feedback; a later prompt calibration affects future generations while keeping every original generation and prompt unchanged.
 
 ## Finish
 

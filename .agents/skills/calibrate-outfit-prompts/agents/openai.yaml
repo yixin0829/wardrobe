@@ -1,0 +1,4 @@
+interface:
+  display_name: "Calibrate Outfit Prompts"
+  short_description: "Learn prompt preferences from local image feedback"
+  default_prompt: "Use $calibrate-outfit-prompts to review my outfit image feedback and improve the generation guidance."

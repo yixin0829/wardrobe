@@ -1,0 +1,79 @@
+.collection-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 28px; }
+.collection-nav { display: flex; gap: 24px; }
+.collection-nav button { min-height: 44px; border: 0; border-bottom: 2px solid transparent; padding: 5px 0; background: transparent; color: var(--muted); font-size: 20px; font-weight: 500; cursor: pointer; }
+.collection-nav button.active { color: var(--ink); border-bottom-color: var(--ink); }
+.collection-nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+.prompt-calibration-control { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 11px; }
+.prompt-calibration-control button { min-height: 34px; border: 0; padding: 5px 0; background: none; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.prompt-calibration-control p { width: 100%; margin: 0; color: var(--accent); }
+.viewer-photo-actions { flex: 0 0 auto; padding: 0 34px 20px; }
+.photo-actions { min-width: 0; }
+.photo-actions__row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.photo-actions__ratings { display: flex; gap: 6px; }
+.photo-actions__ratings button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+.photo-actions__ratings button.is-selected { background: rgba(25, 25, 25, .06); border-color: var(--ink); color: var(--ink); }
+.photo-actions__ratings button:not(:disabled):hover { color: var(--ink); border-color: var(--ink); }
+.photo-actions .photo-actions__regenerate { min-height: 44px; }
+.photo-actions button:disabled,
+.photo-dialog button:disabled,
+.prompt-calibration-control button:disabled { opacity: .5; cursor: default; }
+.photo-actions button:focus-visible,
+.photo-dialog button:focus-visible,
+.prompt-calibration-control button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.photo-actions__note { margin: 9px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.photo-actions__status { margin: 9px 0 0; font-size: 12px; line-height: 1.5; }
+.photo-actions__undo { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 0; border: 1px solid var(--line); padding: 7px 10px; background: rgba(255, 255, 255, .3); font-size: 11px; line-height: 1.5; }
+.photo-actions__undo button { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; min-width: 44px; border: 0; padding: 4px 0; background: transparent; color: var(--accent); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.photo-actions__error { margin: 10px 0 0; color: var(--accent); font-size: 12px; line-height: 1.5; }
+.photo-actions__error p { margin: 0; }
+.photo-actions__error button { min-height: 34px; border: 0; padding: 5px 0; background: transparent; color: var(--accent); text-decoration: underline; cursor: pointer; }
+.photo-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; border: 1px solid var(--line); border-radius: 0; padding: 0; background: var(--paper); color: var(--ink); box-shadow: 0 18px 70px rgba(25, 24, 22, .2); overflow: auto; }
+.photo-dialog::backdrop { background: rgba(25, 24, 22, .38); }
+.photo-dialog__content { padding: 24px; }
+.photo-dialog__heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.photo-dialog__heading h2 { margin: 0; font-size: 20px; line-height: 1.3; font-weight: 520; letter-spacing: -.02em; }
+.photo-dialog__close { flex: 0 0 44px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; padding: 0; background: transparent; color: var(--ink); cursor: pointer; }
+.photo-dialog__intro { margin: 15px 0 22px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.photo-dialog__field textarea { width: 100%; min-height: 110px; resize: vertical; border: 1px solid var(--line); border-radius: 0; padding: 12px; background: rgba(255, 255, 255, .22); color: var(--ink); font: inherit; font-size: 14px; line-height: 1.5; }
+.photo-dialog__field textarea:focus { border-color: var(--ink); outline: 1px solid var(--ink); outline-offset: 0; }
+.photo-dialog__footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.photo-dialog__footer .secondary-button,
+.photo-dialog__footer .primary-button { min-height: 44px; }
+.outfit-collection-heading { padding: 12px 56px 0; }
+.outfit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 30px 26px; padding: 30px 56px 70px; }
+.outfit-tile { min-width: 0; display: flex; flex-direction: column; gap: 12px; align-items: stretch; border: 0; padding: 0; background: transparent; text-align: left; color: var(--ink); cursor: zoom-in; }
+.outfit-tile img { width: 100%; aspect-ratio: 1; object-fit: cover; -webkit-user-drag: none; }
+.outfit-tile span { font-size: 14px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+.outfit-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+.outfit-collection-error { margin: 50px 56px; color: var(--accent); font-size: 13px; }
+.outfit-viewer { padding: 0; }
+.outfit-viewer .viewer-icon-close { top: 20px; right: 20px; background: rgba(244, 240, 232, .88); }
+.outfit-viewer__image { flex: 0 0 auto; display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.outfit-viewer__details { padding: 24px 30px 36px; }
+.outfit-viewer__details h2 { margin: 0 0 12px; font-size: 20px; line-height: 1.3; font-weight: 520; letter-spacing: -.015em; }
+.outfit-viewer__reason { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.outfit-viewer__occasion { margin: 0 0 20px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.outfit-viewer .photo-actions { margin-top: 20px; }
+@media (max-width: 1180px) {
+  .viewer-photo-actions { padding-inline: 30px; }
+  .outfit-collection-heading { padding-inline: 34px; }
+  .outfit-grid { padding-inline: 34px; }
+}
+@media (max-width: 860px) {
+  .outfit-collection-heading { padding-inline: 24px; }
+  .outfit-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 16px; padding: 24px; }
+  .outfit-viewer { padding: 0; }
+}
+@media (max-width: 520px) {
+  .collection-toolbar { gap: 10px; margin-bottom: 22px; }
+  .collection-nav { gap: 22px; }
+  .collection-nav button { font-size: 18px; }
+  .viewer-photo-actions { padding: 0 22px 20px; }
+  .photo-dialog__content { padding: 20px; }
+  .photo-dialog__field textarea { font-size: 16px; }
+  .outfit-collection-heading { padding-inline: 18px; }
+  .outfit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 14px; padding: 22px 18px 40px; }
+  .outfit-tile span { font-size: 12px; }
+  .outfit-viewer__details { padding: 22px 22px max(30px, env(safe-area-inset-bottom)); }
+  .outfit-collection-error { margin: 40px 18px; }
+}

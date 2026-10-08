@@ -7,6 +7,8 @@ import process from "node:process";
 import sharp from "sharp";
 import { getExpectedModeledModes, getModeledImages, normalizeLayering, normalizeWardrobeItem } from "../../../../src/wardrobe-model.js";
 import { withLibraryLock } from "../../../../scripts/library-store.mjs";
+import { archiveExistingPhotos, archiveGeneratedPhoto } from "../../../../scripts/photo-history.mjs";
+import { resolveWardrobeDataDir } from "../../../../scripts/wardrobe-paths.mjs";
 
 const PARTS = new Set(["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -79,7 +81,10 @@ function normalizeItem(item) {
       const mode = entry?.mode === "top" ? "default" : entry?.mode;
       if (!MODES.has(mode) || modes.has(mode)) throw new Error(`${slug}: modeledFiles must have unique valid modes`);
       modes.add(mode);
-      return { mode, file: localPng(entry.file, slug, "modeledFiles.file") };
+      if (entry.prompt !== undefined && entry.prompt !== null && (typeof entry.prompt !== "string" || entry.prompt.length > 60000)) throw new Error(`${slug}: modeled prompt must be text or null`);
+      if (entry.promptRevisionId !== undefined && entry.promptRevisionId !== null && typeof entry.promptRevisionId !== "string") throw new Error(`${slug}: modeled prompt revision ID must be text or null`);
+      if (entry.context !== undefined && (!entry.context || typeof entry.context !== "object" || Array.isArray(entry.context))) throw new Error(`${slug}: modeled context must be an object`);
+      return { mode, file: localPng(entry.file, slug, "modeledFiles.file"), prompt: entry.prompt ?? null, promptRevisionId: entry.promptRevisionId ?? null, context: entry.context || {} };
     });
   } else if (item.modeledFile) {
     modeledFiles = [{ mode: null, file: localPng(item.modeledFile, slug, "modeledFile") }];
@@ -188,7 +193,7 @@ for (const item of accepted) {
 }
 if (new Set(prepared.map(({ id }) => id)).size !== prepared.length) throw new Error("Accepted items contain duplicate garment cutouts; consolidate physical items in the manifest");
 
-const dataDir = path.join(repo, "data");
+const dataDir = resolveWardrobeDataDir(repo);
 const importedDir = path.join(dataDir, "imported");
 const libraryFile = path.join(dataDir, "library.json");
 async function importRecords() {
@@ -233,10 +238,27 @@ async function importRecords() {
   }
 
   if (!options.dryRun) {
+    await archiveExistingPhotos({ dataDir });
     await mkdir(importedDir, { recursive: true });
     for (const item of prepared) {
       await writeAsset(path.join(importedDir, item.assetName), item.bytes);
-      for (const model of item.models) await writeAsset(path.join(importedDir, model.assetName), model.bytes);
+      const modeledImages = [];
+      for (const model of item.models) {
+        await writeAsset(path.join(importedDir, model.assetName), model.bytes);
+        const version = await archiveGeneratedPhoto({
+          dataDir, kind: "item", targetId: item.id, mode: model.mode,
+          bytes: model.bytes, source: "agent", status: "accepted", activate: false,
+          prompt: model.prompt ?? null, promptRevisionId: model.promptRevisionId ?? null,
+          context: { ...model.context, name: item.name, part: item.part, canLayer: normalizeLayering(item, nextRecords.find((entry) => entry.id === item.id)).canLayer },
+        });
+        modeledImages.push({ id: `${item.id}-${model.mode}`, mode: model.mode, image: version.image });
+      }
+      if (modeledImages.length) {
+        modeledImages.sort((first, second) => (first.mode === "layer") - (second.mode === "layer"));
+        const record = nextRecords.find((entry) => entry.id === item.id);
+        record.modeledImages = modeledImages;
+        record.modeledImage = modeledImages[0].image;
+      }
     }
     await atomicJson(libraryFile, nextRecords);
   }

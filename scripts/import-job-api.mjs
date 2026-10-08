@@ -4,6 +4,9 @@ import path from "node:path";
 import sharp from "sharp";
 import { getExpectedModeledModes, getModeledImages, normalizeLayering, normalizeWardrobeItem } from "../src/wardrobe-model.js";
 import { withLibraryLock as lockLibrary } from "./library-store.mjs";
+import { createPhotoFeedbackApi } from "./photo-feedback-api.mjs";
+import { archiveGeneratedPhoto, resolvePhotoFile } from "./photo-history.mjs";
+import { getPromptCalibration } from "./prompt-calibration.mjs";
 
 const API_ROOT = "/api/import/jobs";
 const ASSET_ROOT = "/api/import/assets";
@@ -321,7 +324,7 @@ Use a natural pose with arms and accessories away from the garment. Keep the com
 Avoid hidden details, invented openings or closures, fake text or logos, extra statement pieces, crossed arms, bags or scarves covering the item, cropped item extremities, extra people, text overlays, watermarks, product-mockup styling, unrealistic anatomy or synthetic AI polish.`;
 }
 
-async function openAIEdit({ key, baseUrl, model, prompt, images, size, background, quality }) {
+async function openAIEdit({ key, baseUrl, model, prompt, images, size, background, quality, signal }) {
   const form = new FormData();
   form.set("model", model);
   form.set("prompt", prompt);
@@ -334,7 +337,7 @@ async function openAIEdit({ key, baseUrl, model, prompt, images, size, backgroun
     form.append("image[]", new Blob([normalized], { type: "image/png" }), image.name?.replace(/\.[^.]+$/, ".png") || `image-${index + 1}.png`);
   }
   const response = await fetch(`${baseUrl}/images/edits`, {
-    method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form,
+    method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form, signal,
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error?.message || `OpenAI image request failed (${response.status})`);
@@ -370,6 +373,8 @@ export function wardrobeImportApi(options = {}) {
   let jobsDir;
   let importedFile;
   let libraryAssetDir;
+  let photoApi;
+  let dataDirectory;
   const running = new Map();
   const jobWrites = new Map();
   let libraryWrites = Promise.resolve();
@@ -592,10 +597,8 @@ export function wardrobeImportApi(options = {}) {
       const setup = await setupStatus();
       if (!setup.ready) throw Object.assign(new Error("Add an OpenAI API key and model reference before creating modeled photos."), { status: 503 });
       const libraryFile = (image) => {
-        const pathname = new URL(image, "http://localhost").pathname;
-        const match = pathname.match(/^\/api\/import\/library\/([\w.-]+)$/i);
-        if (!match) throw Object.assign(new Error("The item's local image could not be resolved."), { status: 400 });
-        return path.join(libraryAssetDir, match[1]);
+        try { return resolvePhotoFile(dataDirectory, image); }
+        catch { throw Object.assign(new Error("The item's local image could not be resolved."), { status: 400 }); }
       };
       const garmentBytes = await readFile(libraryFile(record.image));
       const retained = [];
@@ -686,15 +689,23 @@ export function wardrobeImportApi(options = {}) {
             catch (error) { if (error.code !== "ENOENT") throw error; }
           }
           const modes = getExpectedModeledModes(current.metadata);
+          const calibration = await getPromptCalibration(dataDirectory);
           const batchId = randomUUID();
           for (const mode of modes) {
             if (generatedImages.some((image) => image.mode === mode)) continue;
             const basePrompt = buildModeledPrompt(current.metadata, mode, references.length, options.modeledDirection || setting("WARDROBE_MODEL_DIRECTION"));
-            const prompt = [basePrompt, options.modeledPrompt, current.stages.modeled.prompt ? `User regeneration direction: ${current.stages.modeled.prompt}` : null].filter(Boolean).join("\n");
+            const prompt = [basePrompt, calibration.guidance ? `Calibrated styling preferences, applicable only where consistent with identity, exact selected garments, real construction, framing and user model direction: ${calibration.guidance}` : null, options.modeledPrompt, current.stages.modeled.prompt ? `User regeneration direction: ${current.stages.modeled.prompt}` : null].filter(Boolean).join("\n");
             const imageBytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2")), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [...references, garment], prompt });
-            const normalized = await normalizeImage(imageBytes);
+            let normalized;
+            try { normalized = await normalizeImage(imageBytes); }
+            catch (failure) {
+              await archiveGeneratedPhoto({ dataDir: dataDirectory, kind: "item", targetId: `import-${current.id}`, mode, bytes: imageBytes, activate: false, source: "import", status: "invalid", prompt, promptRevisionId: calibration.activeRevisionId, context: { name: current.metadata.name, mode } });
+              throw failure;
+            }
             const dimensions = await sharp(normalized).metadata();
-            if (Math.abs((dimensions.width / dimensions.height) - 1.5) > 0.02) throw new Error("Modeled photo must be horizontal 3:2. Regenerate the complete set.");
+            const validAspect = Math.abs((dimensions.width / dimensions.height) - 1.5) <= 0.02;
+            await archiveGeneratedPhoto({ dataDir: dataDirectory, kind: "item", targetId: `import-${current.id}`, mode, bytes: normalized, activate: false, source: "import", status: validAspect ? "accepted" : "invalid", prompt, promptRevisionId: calibration.activeRevisionId, context: { name: current.metadata.name, garmentIds: [`import-${current.id}`], mode, model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2")), modelDirection: setting("WARDROBE_MODEL_DIRECTION") } });
+            if (!validAspect) throw new Error("Modeled photo must be horizontal 3:2. Regenerate the complete set.");
             const name = `modeled-${stage.attempts}-${mode}-${batchId}.png`;
             await writeFile(path.join(dir, name), normalized);
             generatedImages.push({ id: `${mode}-${batchId}`, mode, image: `${ASSET_ROOT}/${current.id}/${name}` });
@@ -776,6 +787,7 @@ export function wardrobeImportApi(options = {}) {
           const records = await loadImported();
           const record = records.find((item) => item.id === id);
           if (!record) throw Object.assign(new Error("Imported wardrobe item not found"), { status: 404 });
+          await photoApi.captureItem(id);
           // The handler holds this item's job lock before entering the library
           // transaction, so a pending approval cannot recreate the deleted item.
           const pendingJobId = record.importJobId || id.slice("import-".length);
@@ -978,6 +990,7 @@ export function wardrobeImportApi(options = {}) {
     async configResolved(config) {
       root = config.root;
       const dataDir = path.resolve(root, setting("WARDROBE_DATA_DIR", "data"));
+      dataDirectory = dataDir;
       jobsDir = path.join(dataDir, "jobs");
       importedFile = path.join(dataDir, "library.json");
       libraryAssetDir = path.join(dataDir, "imported");
@@ -990,6 +1003,8 @@ export function wardrobeImportApi(options = {}) {
           if (JSON.stringify(records) !== JSON.stringify(normalized)) await atomicJson(importedFile, normalized);
         } catch (error) { if (error.code !== "ENOENT") throw error; }
       });
+      photoApi = createPhotoFeedbackApi({ root, dataDir, env: options.env, now: options.now, buildItemPrompt: buildModeledPrompt, editImage: openAIEdit });
+      await photoApi.initialize();
       const ids = await readdir(jobsDir).catch(() => []);
       for (const id of ids) {
         const job = await loadJob(id);
@@ -1024,7 +1039,7 @@ export function wardrobeImportApi(options = {}) {
         }
       }
     },
-    configureServer(server) { server.middlewares.use(handler); },
-    configurePreviewServer(server) { server.middlewares.use(handler); },
+    configureServer(server) { server.middlewares.use((req, res, next) => photoApi.handle(req, res, () => handler(req, res, next))); },
+    configurePreviewServer(server) { server.middlewares.use((req, res, next) => photoApi.handle(req, res, () => handler(req, res, next))); },
   };
 }
