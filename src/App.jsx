@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
+import { ModeledCarousel } from "./ModeledCarousel.jsx";
+import { ShirtControls } from "./ShirtControls.jsx";
+import { getModeledImages } from "./wardrobe-model.js";
 
 const STORAGE_KEY = "open-wardrobe-edits-v1";
 const DELETED_STORAGE_KEY = "open-wardrobe-deleted-v1";
@@ -21,29 +24,27 @@ const TYPE_ORDER = Object.fromEntries(TYPES.slice(1).map((type, index) => [type.
 
 function readEdits() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    const edits = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    return edits && typeof edits === "object" && !Array.isArray(edits) ? edits : {};
   } catch {
     return {};
   }
 }
 
 
-function persistEdit(item) {
-  const edits = readEdits();
-  edits[item.id] = {
-    name: item.name || "",
-    part: item.part,
-    color: item.color || null,
-    secondaryColor: item.secondaryColor || null,
-    tags: item.tags || [],
-  };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(edits));
-}
-
 function removePersistedEdit(id) {
   const edits = readEdits();
   delete edits[id];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(edits));
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(edits)); } catch { /* Storage may be unavailable; the server remains the source of truth. */ }
+}
+
+function itemDraft(item) {
+  const isShirt = item.part === "upperbody" && item.isShirt === true;
+  return {
+    name: item.name || "", part: item.part, color: item.color || "#9a9286",
+    secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])],
+    isShirt, canLayer: isShirt && item.canLayer === true, layeringSource: item.layeringSource || "ai",
+  };
 }
 
 function readDeletedItems() {
@@ -155,6 +156,10 @@ function sampleImageColor(image, canvas, event) {
 
 function GalleryItem({ item, selected, onOpen }) {
   const type = TYPE_MAP[item.part]?.singular || "wardrobe item";
+  const source = item.thumbnail || item.image;
+  const thumbnailSource = typeof source === "string" && source.startsWith("/api/import/library/")
+    ? `${source}${source.includes("?") ? "&" : "?"}thumbnail=1`
+    : source;
 
   return (
     <button
@@ -166,11 +171,12 @@ function GalleryItem({ item, selected, onOpen }) {
       data-testid={`wardrobe-item-${item.id}`}
     >
       <OptimizedImage
-        src={item.thumbnail || item.image}
+        src={thumbnailSource}
         alt=""
         sizes="(max-width: 520px) calc(50vw - 16px), (max-width: 860px) calc(33vw - 18px), 180px"
         breakpoints={[120, 180, 240, 320, 480]}
       />
+      {item.part === "upperbody" && item.isShirt && item.canLayer && <span className="layerable-badge">Layerable</span>}
     </button>
   );
 }
@@ -278,7 +284,7 @@ function ColorControl({ label, field, value, palette, onChange, sampling, setSam
   );
 }
 
-function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleStatus }) {
+function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleStatus, disabled = false }) {
   const suggestedSecondary = palette.find((color) => color.toLowerCase() !== draft.color?.toLowerCase()) || "#9a9286";
 
   return (
@@ -294,10 +300,12 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
 
       <label className="field">
         <span>Category</span>
-        <select value={draft.part} onChange={(event) => setDraft((current) => ({ ...current, part: event.target.value }))}>
+        <select value={draft.part} onChange={(event) => setDraft((current) => ({ ...current, part: event.target.value, ...(event.target.value !== "upperbody" ? { isShirt: false, canLayer: false, layeringSource: "manual" } : {}) }))}>
           {TYPES.slice(1).map((type) => <option value={type.id} key={type.id}>{type.label}</option>)}
         </select>
       </label>
+
+      <ShirtControls value={draft} onChange={setDraft} disabled={disabled} />
 
       <fieldset className="color-field">
         <legend>Colors</legend>
@@ -335,7 +343,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
   );
 }
 
-function ItemViewer({ item, onClose, onSave, onDelete }) {
+function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
   const closeButtonRef = useRef(null);
   const imageRef = useRef(null);
   const samplingCanvasRef = useRef(null);
@@ -343,11 +351,23 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
   const [sampling, setSampling] = useState(null);
   const [sampleStatus, setSampleStatus] = useState("");
   const [palette, setPalette] = useState(item.palette || []);
-  const [draft, setDraft] = useState({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
+  const [draft, setDraft] = useState(() => itemDraft(item));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [creatingModeled, setCreatingModeled] = useState(false);
+  const [modeledError, setModeledError] = useState("");
   const [shaking, setShaking] = useState(false);
   const [closeBlocked, setCloseBlocked] = useState(false);
   const type = TYPE_MAP[item.part]?.singular || "Wardrobe item";
-  const hasModeledImage = Boolean(item.modeledImage);
+  const savedModeledImages = getModeledImages(item);
+  const topImage = savedModeledImages.find((image) => image.mode === "top")
+    || savedModeledImages.find((image) => image.mode === "default");
+  const layerImage = item.part === "upperbody" && item.isShirt && item.canLayer
+    ? savedModeledImages.find((image) => image.mode === "layer") : null;
+  const modeledImages = [topImage, layerImage].filter(Boolean);
+  const hasModeledImage = modeledImages.length > 0;
+  const canCreateLayerLook = item.part === "upperbody" && item.isShirt && item.canLayer && !layerImage;
+  const pending = saving || creatingModeled;
   const pieceRotation = useMemo(() => {
     const hash = [...item.id].reduce((total, character) => total + character.charCodeAt(0), 0);
     return `${(hash % 9) - 4}deg`;
@@ -361,12 +381,14 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
       color: draft.color?.toLowerCase() || null,
       secondaryColor: draft.secondaryColor?.toLowerCase() || null,
       tags: normalizedTags(draft.tags),
+      isShirt: draft.isShirt, canLayer: draft.canLayer, layeringSource: draft.layeringSource,
     }) !== JSON.stringify({
       name: (item.name || "").trim(),
       part: item.part,
       color: item.color?.toLowerCase() || null,
       secondaryColor: item.secondaryColor?.toLowerCase() || null,
       tags: normalizedTags(item.tags || []),
+      isShirt: itemDraft(item).isShirt, canLayer: itemDraft(item).canLayer, layeringSource: itemDraft(item).layeringSource,
     });
   }, [draft, item]);
 
@@ -381,9 +403,10 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
   }, []);
 
   const requestClose = useCallback(() => {
+    if (pending) return;
     if (isDirty) nudgeUnsaved();
     else onClose();
-  }, [isDirty, nudgeUnsaved, onClose]);
+  }, [isDirty, nudgeUnsaved, onClose, pending]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -411,20 +434,39 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
     setSampling(null);
     setSampleStatus("");
     setPalette(item.palette || []);
-    setDraft({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
+    setDraft(itemDraft(item));
+    setSaveError("");
+    setModeledError("");
   }, [item]);
 
   const cancelEditing = () => {
-    setDraft({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
+    setDraft(itemDraft(item));
     setSampling(null);
     setSampleStatus("");
     onClose();
   };
 
-  const saveEditing = () => {
-    onSave({ ...item, ...draft, name: draft.name.trim(), tags: draft.tags.map((tag) => tag.trim()).filter(Boolean) });
+  const saveEditing = async () => {
+    if (pending) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await onSave({ ...item, ...draft, name: draft.name.trim(), tags: draft.tags.map((tag) => tag.trim()).filter(Boolean) });
+      setSampling(null);
+      setSampleStatus("Changes saved.");
+    } catch (requestError) {
+      setSaveError(requestError.message);
+    } finally { setSaving(false); }
+  };
+
+  const createModeledLooks = async () => {
+    if (pending || isDirty || !canCreateLayerLook) return;
+    setCreatingModeled(true);
+    setModeledError("");
     setSampling(null);
-    setSampleStatus("Changes saved.");
+    try { await onCreateModeled(item.id); }
+    catch (requestError) { setModeledError(requestError.message); }
+    finally { setCreatingModeled(false); }
   };
 
   const handleImageLoad = (event) => {
@@ -434,7 +476,7 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
   };
 
   const handleImageClick = (event) => {
-    if (!sampling || !samplingCanvasRef.current) return;
+    if (pending || !sampling || !samplingCanvasRef.current) return;
     const color = sampleImageColor(event.currentTarget, samplingCanvasRef.current, event);
     if (!color) {
       setSampleStatus("That spot is transparent—try directly on the garment.");
@@ -475,23 +517,23 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
       </button>
 
       {hasModeledImage ? (
+        <>
         <div className="modeled-hero">
-          <OptimizedImage
-            className="modeled-hero-photo"
-            src={item.modeledImage}
-            alt={`${draft.name || type} worn by a model`}
-            sizes="(max-width: 860px) 100vw, 520px"
-            breakpoints={[320, 480, 640, 800, 1040, 1280]}
-            quality={82}
-            priority
+          <ModeledCarousel
+            images={modeledImages}
+            label={draft.name || type}
+            className="modeled-carousel--hero"
+            imageClassName="modeled-hero-photo"
+            imageProps={{ sizes: "(max-width: 860px) 100vw, 520px", breakpoints: [320, 480, 640, 800, 1040, 1280], quality: 82, priority: true }}
           />
-          <div className="viewer-heading modeled-heading">
+          {garmentArtwork}
+        </div>
+          <div className="viewer-heading modeled-caption">
             <div>
               <h2>{draft.name || TYPE_MAP[draft.part]?.singular}</h2>
             </div>
           </div>
-          {garmentArtwork}
-        </div>
+        </>
       ) : (
         <>
           <div className="viewer-heading">
@@ -504,6 +546,7 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
       )}
 
       <div className="viewer-details editing">
+        <fieldset className="item-edit-fields" disabled={pending}>
         <ItemEditor
           draft={draft}
           setDraft={setDraft}
@@ -511,18 +554,29 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
           sampling={sampling}
           setSampling={setSampling}
           sampleStatus={sampleStatus}
+          disabled={pending}
         />
+        </fieldset>
+
+        {canCreateLayerLook && <div className="create-modeled-look">
+          <button className="secondary-button" type="button" disabled={pending || isDirty} onClick={createModeledLooks}>
+            {creatingModeled ? "Preparing looks…" : topImage ? "Create layer look" : "Create modeled looks"}
+          </button>
+          <p>{isDirty ? "Save your changes first." : topImage ? "Add an open-shirt look over an inner top." : "Create a closed top look and an open layer look."}</p>
+        </div>}
 
         {closeBlocked && <p className="unsaved-notice" role="status">Save or cancel changes before closing.</p>}
+        {saveError && <p className="save-error" role="alert">{saveError}</p>}
+        {modeledError && <p className="save-error" role="alert">{modeledError}</p>}
 
         <div className="viewer-actions">
-          <button className="delete-button" type="button" onClick={() => onDelete(item.id)}>
+          <button className="delete-button" type="button" disabled={pending} onClick={() => onDelete(item.id)}>
             <Trash size={15} weight="regular" aria-hidden="true" /> Delete
           </button>
           <span className="action-spacer" />
-          <button className="secondary-button" type="button" onClick={cancelEditing}>Cancel</button>
-          <button className="primary-button" type="button" onClick={saveEditing}>
-            <Check size={15} weight="bold" aria-hidden="true" /> Save
+          <button className="secondary-button" type="button" disabled={pending} onClick={cancelEditing}>Cancel</button>
+          <button className="primary-button" type="button" disabled={pending || !draft.name.trim()} onClick={saveEditing}>
+            <Check size={15} weight="bold" aria-hidden="true" /> {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>
@@ -538,6 +592,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [requestedJob, setRequestedJob] = useState(null);
 
   useEffect(() => {
     fetch("/api/import/wardrobe", { cache: "no-store" })
@@ -573,9 +628,17 @@ export function App() {
     setSelectedId(null);
   };
 
-  const saveItem = (updatedItem) => {
-    setItems((current) => current.map((item) => item.id === updatedItem.id ? updatedItem : item));
-    persistEdit(updatedItem);
+  const saveItem = async (updatedItem) => {
+    const response = await fetch(`/api/import/wardrobe/${encodeURIComponent(updatedItem.id)}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ metadata: itemDraft(updatedItem) }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Could not save these changes. Try again.");
+    const storedItem = result.item || result;
+    if (storedItem.id !== updatedItem.id) throw new Error("The wardrobe returned an incomplete item. Try saving again.");
+    removePersistedEdit(updatedItem.id);
+    setItems((current) => current.map((item) => item.id === updatedItem.id ? storedItem : item));
   };
 
   const deleteItem = async (id) => {
@@ -598,10 +661,22 @@ export function App() {
     setItems((current) => current.some((item) => item.id === newItem.id) ? current : [...current, newItem]);
   }, []);
 
-  const attachImportedModeledImage = useCallback((jobId, modeledImage) => {
-    const id = `import-${jobId}`;
-    setItems((current) => current.map((item) => item.id === id ? { ...item, modeledImage } : item));
+  const attachImportedModeledImage = useCallback((storedItem) => {
+    removePersistedEdit(storedItem.id);
+    setItems((current) => current.map((item) => item.id === storedItem.id ? storedItem : item));
   }, []);
+
+  const createModeledLooks = async (id) => {
+    const response = await fetch(`/api/import/wardrobe/${encodeURIComponent(id)}/modeled`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Could not create the modeled looks. Try again.");
+    if (!result.job?.id) throw new Error("The modeled look could not be queued. Try again.");
+    setRequestedJob(result.job);
+    setSelectedId(null);
+  };
+  const consumeRequestedJob = useCallback(() => setRequestedJob(null), []);
 
   return (
     <div className={`app-shell${selectedItem ? " has-selection" : ""}`}>
@@ -643,8 +718,8 @@ export function App() {
         )}
       </main>
 
-      {selectedItem && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} />}
-      <WardrobeImportFlow onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} />
+      {selectedItem && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onCreateModeled={createModeledLooks} />}
+      <WardrobeImportFlow onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} requestedJob={requestedJob} onRequestedJobConsumed={consumeRequestedJob} />
     </div>
   );
 }

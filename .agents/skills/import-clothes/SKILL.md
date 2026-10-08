@@ -13,6 +13,8 @@ Obtain the source-image folder unless the user already supplied it. Resolve rela
 
 At the start, check for the identity reference at `data/model-reference.png` or the local path configured by `WARDROBE_MODEL_REFERENCE`. If neither exists, ask: `Please provide a clear PNG reference photo of yourself for the modeled wardrobe images. What is its local path?` Do not begin modeled generation until the user supplies it. Keep the image local and never add it to Git.
 
+When present, use `data/model-reference-2.png` and `data/model-reference-3.png` for body proportions, with the primary reference controlling the face. Apply the user's current modeled-photo direction or `WARDROBE_MODEL_DIRECTION` when configured (for example, longer-leg male-model styling); otherwise preserve the supplied body proportions. Include all applicable local references without changing the originals.
+
 Default to direct database import when the user asks to add clothes to Wardrobe. If they only request cutouts, ask for a new output-folder name instead and skip the database step.
 
 ## Rules
@@ -52,6 +54,8 @@ Use `rg --files` first. Include JPEG, PNG, WebP, HEIC/HEIF, TIFF, BMP, and AVIF.
 
 Create upright RGB JPEG working copies at quality 95 or better without upscaling. Make labeled contact sheets of at most 12 photos and inspect every sheet. Inventory every deliberately worn top, jacket, bottom, accessory, and pair of shoes.
 
+Read `data/library.json` before generating: consolidate confirmed physical duplicates with existing items and honor their saved shirt/layer choices. Reuse the existing accepted cutout for a confirmed existing item so its content-derived ID remains unchanged. A shirt stays one `upperbody` item in Tops even when it also works as a layer.
+
 ### 2. Build the manifest
 
 Write `$WORK/manifest.json` using this final shape:
@@ -60,14 +64,20 @@ Write `$WORK/manifest.json` using this final shape:
 {
   "items": [
     {
-      "slug": "navy-fair-isle-cardigan",
-      "file": "navy-fair-isle-cardigan.png",
-      "modeledFile": "navy-fair-isle-cardigan.png",
-      "name": "Navy Fair Isle Cardigan",
-      "part": "wholebody_up",
+      "slug": "navy-flannel-shirt",
+      "file": "navy-flannel-shirt.png",
+      "modeledFiles": [
+        { "mode": "top", "file": "navy-flannel-shirt-top.png" },
+        { "mode": "layer", "file": "navy-flannel-shirt-layer.png" }
+      ],
+      "name": "Navy Flannel Shirt",
+      "part": "upperbody",
+      "isShirt": true,
+      "canLayer": true,
+      "layeringSource": "ai",
       "color": "#172033",
       "secondaryColor": "#f2efe6",
-      "tags": ["knit", "fair isle", "zip"],
+      "tags": ["flannel", "plaid", "button-front"],
       "status": "accepted",
       "sourceRefs": ["IMG_1284.jpg", "IMG_1289.jpg"],
       "unknowns": []
@@ -85,6 +95,14 @@ Use only these `part` values:
 - `shoes` — shoes
 
 Use lowercase hyphenated slugs, six-digit hex colors, at most 12 short lowercase tags, and `null` when there is no genuinely distinct secondary color. Keep working records as `status: "generate"` or `status: "hold"`; change a record to `accepted` only after final QA. The import script ignores every non-accepted record.
+
+Classify every item from visible construction:
+
+- `isShirt: true` means an `upperbody` shirt with a full front opening; tees, polos and pullovers are false.
+- `canLayer: true` means a shirt whose full opening, weight and fit support wearing it open over another top: casual flannel shirts, overshirts and roomy casual button-front shirts qualify. Dress shirts and uncertain cases default to false.
+- Set both fields false for other items and `layeringSource: "ai"` for new judgments. A saved `layeringSource: "manual"` choice takes precedence over an AI reclassification; carry it into the working manifest before selecting modeled modes.
+
+Use `modeledFiles` for new modeled output: exactly `top` and `layer` for a layerable shirt, exactly `top` for a non-layerable shirt, and exactly `default` for every other piece. The legacy `modeledFile` input remains supported for older single-photo manifests. All filenames are local PNG basenames.
 
 ### 3. Prepare focused references
 
@@ -133,14 +151,24 @@ Inspect checkerboard contact sheets of at most 12 items and compare sensitive re
 
 Use `data/model-reference.png` as the identity reference unless `WARDROBE_MODEL_REFERENCE` points to another local PNG. If neither exists, ask the user for a clear reference photo before continuing. Never add that photo to Git.
 
-For every accepted cutout, use Imagegen with the identity image first and exact garment PNG second. Save a horizontal 3:2 PNG as `$WORK/modeled/SLUG.png` and set `modeledFile` to `SLUG.png` in the manifest.
+For every accepted cutout, use Imagegen with the face identity first, any applicable body references next, then the exact garment PNG. Name the reference roles explicitly in the prompt. Save horizontal 3:2 PNGs in `$WORK/modeled/` and list them in `modeledFiles`:
+
+- Layerable shirt: exactly two photos, `SLUG-top.png` worn closed/buttoned as the top and `SLUG-layer.png` worn unbuttoned over one visible understated inner top using its actual front opening.
+- Other shirt: one `SLUG-top.png` worn buttoned as a top.
+- Every other piece: one `SLUG.png` in `default` mode.
+
+One physical item keeps one cutout, manifest record and database ID. These are item previews; create a separate full outfit collection only when the user requests it.
+
+When adding layer suitability to an existing shirt, reuse its accepted closed-top photo after checking its current garment, identity and styling. Copy that photo into the temporary modeled folder as `SLUG-top.png`, generate only the missing open-layer photo, and import the complete two-mode set with its existing cutout. In the web UI, saving the shirt/layer choices exposes **Create layer look** for eligible items with a single accepted photo; it creates the missing layer view without reimporting or duplicating the item.
 
 Use this generation brief:
 
 ```text
-Create a professional horizontal 3:2 editorial fashion photograph of the person in Image 1 wearing the exact clothing item from Image 2.
+Create a professional horizontal 3:2 editorial fashion photograph. The first reference controls the person's face; supplied body references control proportions subject to the user's explicitly requested model direction. The garment reference is the exact featured item.
 
-Preserve the person's recognizable face, hair, age, build, skin texture, and body proportions. Preserve the featured garment precisely: color, material, fit, construction, pattern, graphics, logos, text, proportions, closure, and distinctive details. Do not redesign, simplify, replace, or reinterpret it.
+Preserve the person's recognizable face, hair, age, build, and skin texture. [Apply the supplied body proportions and configured model direction.] Preserve the featured garment precisely: color, material, fit, construction, pattern, graphics, logos, text, proportions, closure, and distinctive details. Do not redesign, simplify, replace, or reinterpret it.
+
+Wearing mode: [top: featured shirt closed/buttoned as the top; layer: featured shirt unbuttoned over one visible neutral inner top using only its real opening; default: natural featured-item presentation].
 
 Use understated neutral supporting clothes that complete the outfit without covering or competing with the featured item. Keep the full featured item and every important detail visible. Use a natural pose with arms and accessories away from it.
 
@@ -149,7 +177,7 @@ Place the person in a tasteful real-world setting with warm professional natural
 Avoid hidden garment details, invented closures, fake text or logos, extra statement pieces, crossed arms, bags or scarves covering the item, cropped item extremities, extra people, text overlays, watermarks, product-mockup styling, or synthetic AI polish.
 ```
 
-Vary understated settings across a batch while keeping the identity and art direction cohesive. Compare each photo against both references. Regenerate identity drift, garment redesign, blocked details, anatomy failures, or incorrect framing.
+Vary understated settings across a batch while keeping the identity and art direction cohesive. Compare every photo against its identity, body and garment references, and check the selected wearing mode and the exact one-or-two count. Regenerate identity drift, garment redesign, blocked inner tops, invented openings, anatomy failures, or incorrect framing.
 
 ### 8. Import into Wardrobe
 
@@ -164,7 +192,9 @@ node .agents/skills/import-clothes/scripts/import-to-wardrobe.mjs \
   --manifest "$WORK/manifest.json"
 ```
 
-The script validates the cutouts and modeled PNGs, copies them into `data/imported/`, and atomically updates `data/library.json`. It derives stable UUIDs from cutout content, so rerunning an identical import updates metadata and modeled photos without creating duplicates.
+The script validates the cutouts and exact modeled modes, copies immutable image assets into `data/imported/`, and updates `data/library.json` under the same library lock as the web UI. Stable UUIDs from cutout content keep identical imports under one item; physical matching across different cutouts still requires source review. Saved manual shirt/layer choices survive reimport. Metadata-only reimports preserve existing modeled images.
+
+The database stores `modeledImages: [{id, mode, image}]` and keeps `modeledImage` as the first-image cover for compatibility. The side-panel carousel reads that image list. Validate the copied image count and one physical record per accepted item before declaring delivery complete.
 
 Restart the dev server only if the running app does not pick up the database change, then verify the new item count at `/api/import/wardrobe` and visually inspect the gallery.
 

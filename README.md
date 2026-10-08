@@ -40,6 +40,10 @@ $generate-outfits Create modeled outfit ideas from my wardrobe.
 
 Open the cloned repo in Codex and run either prompt. The import skill asks for a local model-reference PNG when needed, reviews every cutout and modeled photo, then writes to `data/library.json` and `data/imported/`. The outfit skill asks how many looks to create, then curates, generates, verifies, and saves the complete collection under `data/`.
 
+Shirts stay in **Tops**. AI prepopulates **Shirt** and **Can wear as a layer** during import: casual flannels and overshirts can qualify, while dress shirts and uncertain cases default to tops only. You can edit these choices; saved manual choices take precedence on reimport. When modeled previews are requested, a layerable shirt gets two images—buttoned as a top and unbuttoned over an inner top—and other pieces get one. Hover over the side-panel photo to reveal arrows, or use the focused carousel's keyboard controls, to browse the pair. Each shirt still counts as one wardrobe item.
+
+For an existing shirt with one accepted modeled photo, save **Shirt** and **Can wear as a layer**, then choose **Create layer look**. Wardrobe keeps the accepted buttoned photo and generates only the missing unbuttoned view for review, without reimporting the shirt.
+
 ### For agents
 
 If you are setting up Wardrobe for a user, ask how they want to import their clothes:
@@ -51,7 +55,7 @@ If you are setting up Wardrobe for a user, ask how they want to import their clo
 
 - Detects every garment in a photo with the OpenAI Responses API
 - Extracts clean product cutouts with the OpenAI Images API
-- Generates an optional modeled editorial preview
+- Generates optional modeled editorial previews: two for a layerable shirt, one for other pieces
 - Keeps originals, jobs, generated images, and the JSON database local in `data/`
 - Supports drag, drop, paste, editing, review, regeneration, and approval
 
@@ -64,7 +68,14 @@ If you are setting up Wardrobe for a user, ask how they want to import their clo
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2` |
 | `OPENAI_IMAGE_QUALITY` | `high` |
 | `WARDROBE_MODEL_REFERENCE` | `data/model-reference.png` |
+| `WARDROBE_MODEL_DIRECTION` | Optional modeled-photo styling direction |
 | `WARDROBE_DATA_DIR` | `data` |
+
+If `model-reference-2.png` and `model-reference-3.png` are beside the primary reference, modeled generation uses them for body proportions while the primary reference controls the face.
+
+## Testing
+
+Run `npm test` for integration checks and `npm run check` for the production build. Run `npm run e2e:serve` for a browser test using anonymous fixtures, a local provider, and isolated temporary storage. See [the browser verification report](docs/e2e-verification.md) for reproducible steps, observed results, and screenshots.
 
 ## License
 

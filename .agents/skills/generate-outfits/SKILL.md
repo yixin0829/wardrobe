@@ -11,6 +11,8 @@ Create a complete local outfit collection from `data/library.json`: select stron
 
 Ask `How many outfits would you like me to generate?` unless the user already provided a positive count. Do not choose a default silently.
 
+Preserve a count or range the user already authorized, including during corrections or regeneration. Item-preview pairs for layerable shirts do not increase the requested lookbook count.
+
 Also obtain the intended season, occasions, dress codes, or styling direction when the user named them. Otherwise create a balanced everyday mix without blocking on more questions.
 
 Do the workflow end to end after receiving the count. Do not stop after returning suggestions, a manifest, or prompts.
@@ -40,6 +42,8 @@ Read `data/library.json`. Resolve `/api/import/library/FILENAME` assets to `data
 - `accessories_up` — optional accessories
 - `shoes` — optional shoes
 
+Layerable shirts remain in `upperbody`. Read `isShirt`, `canLayer` and `layeringSource`; respect saved manual choices. Only `upperbody` items with both `isShirt: true` and `canLayer: true` may additionally fill the outer-layer slot. Older items without these fields remain tops until classified or edited.
+
 Create checkerboard contact sheets of at most 12 garment cutouts and inspect them. Use both metadata and visual evidence; do not style from filenames or colors alone.
 
 If the wardrobe cannot support the requested number of genuinely distinct outfits, tell the user the maximum useful count and ask whether to continue with that number.
@@ -47,6 +51,8 @@ If the wardrobe cannot support the requested number of genuinely distinct outfit
 ## 2. Curate the combinations
 
 Each outfit must contain exactly one top and one bottom, with an optional jacket, shoes, and restrained accessory. Use these principles recovered from the established Wardrobe outfit workflow:
+
+A layerable shirt can fill either the top slot (closed/buttoned) or the outer-layer slot (unbuttoned over a distinct inner top). Give suitable shirts one combination in each mode where the wardrobe and requested count support it. Keep one physical garment ID and select it at most once per outfit. Non-layerable shirts are tops only.
 
 - Favor tonal or analogous color harmony for cohesion.
 - Use complementary contrast selectively and keep one color or garment dominant.
@@ -69,6 +75,10 @@ Build `$WORK/outfits.json` with the final target count:
       "name": "Navy & Camel Classic",
       "occasion": ["smart-casual", "office"],
       "garmentIds": ["import-...", "import-..."],
+      "garmentModes": [
+        { "garmentId": "import-...", "role": "top", "mode": "top" },
+        { "garmentId": "import-...", "role": "bottom", "mode": "default" }
+      ],
       "reason": "Deep navy and camel create controlled warm-cool contrast.",
       "setting": "a quiet warm-stone courtyard with restrained greenery",
       "image": "outfit-images/navy-camel-classic.png",
@@ -78,7 +88,7 @@ Build `$WORK/outfits.json` with the final target count:
 }
 ```
 
-Use stable lowercase hyphenated IDs. Reject duplicate garment combinations even when names or settings differ.
+Use stable lowercase hyphenated IDs and actual distinct wardrobe IDs in `garmentIds` and `garmentModes`. Record every garment's role and mode (`top`, `layer` or `default`); a layerable shirt in the outer slot has `role: "outer"`, `mode: "layer"`. The sorted garment-ID/role/mode assignments define uniqueness, so the same shirt worn closed and open can form different looks while renaming a combination cannot.
 
 ## 3. Prepare references and prompts
 
@@ -90,7 +100,11 @@ Create one generation package per outfit:
 4. Optional exact outer layer
 5. Optional exact shoes or accessory only when deliberately selected
 
+The primary identity reference controls the face. If present, include `data/model-reference-2.png` and `data/model-reference-3.png` for body proportions and apply the user's current model direction or configured `WARDROBE_MODEL_DIRECTION`. Otherwise preserve the identity proportions. When the tool's reference limit requires it, make a temporary labeled identity board with the untouched face and body references; keep every selected garment reference in the generation package.
+
 Read [references/outfit-image-prompt.md](references/outfit-image-prompt.md) and fill its template from the exact outfit record. Inspect every outer-layer reference before choosing the layered clause; never infer a zipper, buttons, placket, opening, or closure.
+
+Use the recorded garment roles/modes explicitly: shirt-as-top is closed/buttoned; shirt-as-layer is unbuttoned with the exact selected inner top visible. Keep real openings and garment proportions in both cases.
 
 Rotate restrained warm, natural settings across the collection while keeping one cohesive editorial art direction.
 
@@ -111,6 +125,7 @@ Require:
 - exact garment color, material, fit, construction, graphics, logos, text, proportions, and closures
 - complete head-to-shoes framing with readable outfit and realistic anatomy
 - natural layering without invented openings or hidden inner pieces
+- every shirt in its recorded closed-top or open-layer mode, with a visible distinct inner top for layer mode
 - no unselected visible garments except plain neutral shoes or invisible basics when no shoes were selected
 - no extra person, text overlay, watermark, product mockup, or synthetic AI polish
 

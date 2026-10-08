@@ -9,7 +9,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "npm run build"
+    "check": "npm run build",
+    "test": "node --test scripts/*.test.mjs",
+    "e2e:serve": "node scripts/browser-e2e-fixture.mjs"
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.2.8",

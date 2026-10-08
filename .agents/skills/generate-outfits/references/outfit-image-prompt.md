@@ -7,6 +7,7 @@ Use case: identity-preserve
 Asset type: square outfit gallery photograph
 
 Image 1: identity reference for the exact person to preserve.
+[If supplied, the labeled face/body identity board uses the primary portrait for the face and the additional references for body proportions. Apply the configured user model direction: MODEL_DIRECTION.]
 Image 2: exact top garment reference.
 Image 3: exact bottom garment reference.
 [Image 4: exact outer-layer reference. Preserve its real construction and closure exactly; never invent a zipper, buttons, placket, or opening.]
@@ -15,9 +16,10 @@ Image 3: exact bottom garment reference.
 Primary request: Create a professional square editorial fashion photograph of the person from Image 1 wearing all of the exact referenced garments, and only those garments.
 
 Outfit: [OUTFIT NAME]
+Wearing assignments: [List the exact garment IDs, roles and modes. Shirt in top mode: closed/buttoned; shirt in layer mode: unbuttoned over the distinct selected inner top.]
 Scene/backdrop: [RESTRAINED REAL-WORLD SETTING].
 
-Subject: Preserve the same person's recognizable face, hair, age, build, skin texture, and body proportions. Dress them in the exact top and bottom references[ plus the exact outer-layer reference][ and the exact selected shoes/accessory]. Plain understated shoes and invisible basics such as socks are allowed only where needed when no shoe reference is provided. Do not add, replace, or invent any other visible clothing or accessory.
+Subject: Preserve the same person's recognizable face, hair, age, build and skin texture. Use the supplied body references for proportions, subject to the explicitly configured user model direction; otherwise preserve the identity reference's body proportions. Dress them in the exact top and bottom references[ plus the exact outer-layer reference][ and the exact selected shoes/accessory] in their recorded wearing modes. Plain understated shoes and invisible basics such as socks are allowed only where needed when no shoe reference is provided. Do not add, replace, or invent any other visible clothing or accessory.
 
 Style/medium: Photorealistic natural editorial fashion campaign with authentic skin and fabric texture and no synthetic AI polish.
 
