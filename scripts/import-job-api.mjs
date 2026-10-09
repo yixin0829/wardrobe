@@ -1,12 +1,13 @@
-import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { getExpectedModeledModes, getModeledImages, normalizeLayering, normalizeWardrobeItem } from "../src/wardrobe-model.js";
-import { withLibraryLock as lockLibrary } from "./library-store.mjs";
+import { body, json } from "./http-json.mjs";
+import { atomicJson, withLibraryLock } from "./library-store.mjs";
 import { createPhotoFeedbackApi } from "./photo-feedback-api.mjs";
-import { archiveGeneratedPhoto, resolvePhotoFile } from "./photo-history.mjs";
-import { getPromptCalibration } from "./prompt-calibration.mjs";
+import { archiveGeneratedPhoto, imageDigest, resolvePhotoFile } from "./photo-history.mjs";
+import { resolveWardrobeDataDir } from "./wardrobe-paths.mjs";
 
 const API_ROOT = "/api/import/jobs";
 const ASSET_ROOT = "/api/import/assets";
@@ -15,26 +16,6 @@ const STAGES = new Set(["crop", "garment", "modeled"]);
 const DECISIONS = new Set(["approve", "reject"]);
 const PARTS = new Set(["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
-
-function json(res, status, value) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Cache-Control", "no-store");
-  res.end(JSON.stringify(value));
-}
-
-async function body(req, limit = 25 * 1024 * 1024) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > limit) throw Object.assign(new Error("Request body too large"), { status: 413 });
-    chunks.push(chunk);
-  }
-  if (!chunks.length) return {};
-  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
-  catch { throw Object.assign(new Error("Expected a JSON request body"), { status: 400 }); }
-}
 
 function publicJob(job) {
   const copy = structuredClone(job);
@@ -284,21 +265,6 @@ async function verifyNoChromaSpill(bytes, key) {
   return { contaminatedPixels, maxSpill };
 }
 
-async function atomicJson(file, value) {
-  const tmp = `${file}.${randomUUID()}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`);
-  try {
-    await rename(tmp, file);
-  } catch (error) {
-    if (!["EBUSY", "EXDEV", "EPERM"].includes(error.code)) {
-      await rm(tmp, { force: true });
-      throw error;
-    }
-    await copyFile(tmp, file);
-    await rm(tmp, { force: true });
-  }
-}
-
 function stageState() {
   return { status: "pending", decision: null, attempts: 0, assetUrl: null, images: [], failedAssetUrl: null, cleanupPreviewUrl: null, cleanupTolerance: 46, cleanupDiagnostics: null, error: null, prompt: null, updatedAt: null };
 }
@@ -389,8 +355,9 @@ export function wardrobeImportApi(options = {}) {
     return task;
   }
 
-  function withLibraryLock(operation) {
-    const task = libraryWrites.catch(() => {}).then(() => lockLibrary(importedFile, operation));
+  // Serialize this process's writes before taking the cross-process library lock.
+  function queueLibraryWrite(operation) {
+    const task = libraryWrites.catch(() => {}).then(() => withLibraryLock(importedFile, operation));
     libraryWrites = task;
     return task;
   }
@@ -465,10 +432,6 @@ export function wardrobeImportApi(options = {}) {
     try {
       const job = JSON.parse(await readFile(path.join(jobsDir, id, "job.json"), "utf8"));
       job.metadata = normalizeMetadata(job.metadata);
-      const stage = job.stages.modeled;
-      if (stage.generationLayering) stage.generationLayering = normalizeLayering(stage.generationLayering);
-      if (Array.isArray(stage.images)) stage.images = getModeledImages({ modeledImages: stage.images });
-      if (job.internal?.retainedModeledImages) job.internal.retainedModeledImages = getModeledImages({ modeledImages: job.internal.retainedModeledImages });
       return job;
     }
     catch (error) { if (error.code === "ENOENT") return null; throw error; }
@@ -485,7 +448,7 @@ export function wardrobeImportApi(options = {}) {
   }
 
   async function persistImported(job, includeModeled = false) {
-    return withLibraryLock(async () => {
+    return queueLibraryWrite(async () => {
       const id = `import-${job.id}`;
       const records = await loadImported();
       const existing = records.find((record) => record.id === id);
@@ -497,14 +460,16 @@ export function wardrobeImportApi(options = {}) {
         ? path.basename(new URL(job.stages.garment.assetUrl, "http://localhost").pathname)
         : `garment-${job.stages.garment.attempts}.png`;
       const garmentBytes = await readFile(path.join(jobsDir, job.id, garmentSource));
-      const digest = (bytes) => createHash("sha256").update(bytes).digest("hex").slice(0, 20);
+      const digest = (bytes) => imageDigest(bytes).slice(0, 20);
       const garmentName = `${id}-garment-${digest(garmentBytes)}.png`;
       await writeFile(path.join(libraryAssetDir, garmentName), garmentBytes);
       const modeledImages = includeModeled ? [] : getModeledImages(existing);
       for (const image of sourceImages) {
-        const retained = job.internal.retainedLibraryImages?.find((entry) => entry.id === image.id && entry.mode === image.mode);
-        if (retained) {
-          modeledImages.push({ ...image, image: retained.image });
+        // A kept photo uses the item's current image, which a regeneration may have replaced since the job started.
+        const kept = job.internal.retainedModeledImages?.some((entry) => entry.id === image.id)
+          && getModeledImages(existing).find((entry) => entry.mode === image.mode);
+        if (kept) {
+          modeledImages.push({ ...image, image: kept.image });
           continue;
         }
         const source = path.basename(new URL(image.image, "http://localhost").pathname);
@@ -527,7 +492,6 @@ export function wardrobeImportApi(options = {}) {
         thumbnail: job.internal.requiresExistingRecord ? existing.thumbnail : `${LIBRARY_ASSET_ROOT}/${garmentName}`,
         modeledImages,
         modeledImage: modeledImages[0]?.image || null,
-        ...(includeModeled ? { modeledLayering: { ...job.stages.modeled.generationLayering } } : {}),
         importJobId: job.id,
       };
       await atomicJson(importedFile, [...records.filter((item) => item.id !== id), record]);
@@ -561,7 +525,7 @@ export function wardrobeImportApi(options = {}) {
   }
 
   async function patchImported(id, changes, required = true) {
-    return withLibraryLock(async () => {
+    return queueLibraryWrite(async () => {
       const records = await loadImported();
       const index = records.findIndex((record) => record.id === id);
       if (index < 0) {
@@ -579,7 +543,7 @@ export function wardrobeImportApi(options = {}) {
   }
 
   async function startExistingModeled(id) {
-    return withLibraryLock(async () => {
+    return queueLibraryWrite(async () => {
       const record = (await loadImported()).find((item) => item.id === id);
       if (!record) throw Object.assign(new Error("Imported wardrobe item not found"), { status: 404 });
       const jobId = id.slice("import-".length);
@@ -625,7 +589,7 @@ export function wardrobeImportApi(options = {}) {
         stages: { crop: { ...approvedStage }, garment: { ...approvedStage }, modeled: { ...stageState(), status: "queued" } },
         createdAt: now, updatedAt: now,
         originalAssetUrl: `${ASSET_ROOT}/${jobId}/original.png`,
-        internal: { originalFile: "original.png", cropFile: "original.png", originalMime: "image/png", requiresExistingRecord: true, libraryGarmentImage: record.image, retainedModeledImages: retained, retainedLibraryImages: accepted.filter((image) => expected.includes(image.mode)) },
+        internal: { originalFile: "original.png", cropFile: "original.png", originalMime: "image/png", requiresExistingRecord: true, libraryGarmentImage: record.image, retainedModeledImages: retained },
       };
       await saveJob(job);
       return { job, reused: false };
@@ -689,22 +653,22 @@ export function wardrobeImportApi(options = {}) {
             catch (error) { if (error.code !== "ENOENT") throw error; }
           }
           const modes = getExpectedModeledModes(current.metadata);
-          const calibration = await getPromptCalibration(dataDirectory);
           const batchId = randomUUID();
+          const model = setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2"));
           for (const mode of modes) {
             if (generatedImages.some((image) => image.mode === mode)) continue;
             const basePrompt = buildModeledPrompt(current.metadata, mode, references.length, options.modeledDirection || setting("WARDROBE_MODEL_DIRECTION"));
-            const prompt = [basePrompt, calibration.guidance ? `Calibrated styling preferences, applicable only where consistent with identity, exact selected garments, real construction, framing and user model direction: ${calibration.guidance}` : null, options.modeledPrompt, current.stages.modeled.prompt ? `User regeneration direction: ${current.stages.modeled.prompt}` : null].filter(Boolean).join("\n");
-            const imageBytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2")), quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [...references, garment], prompt });
+            const prompt = [basePrompt, options.modeledPrompt, current.stages.modeled.prompt ? `User regeneration direction: ${current.stages.modeled.prompt}` : null].filter(Boolean).join("\n");
+            const imageBytes = await openAIEdit({ key, baseUrl: apiBaseUrl(), model, quality: setting("OPENAI_IMAGE_QUALITY", "high"), size: "1536x1024", images: [...references, garment], prompt });
             let normalized;
             try { normalized = await normalizeImage(imageBytes); }
             catch (failure) {
-              await archiveGeneratedPhoto({ dataDir: dataDirectory, kind: "item", targetId: `import-${current.id}`, mode, bytes: imageBytes, activate: false, source: "import", status: "invalid", prompt, promptRevisionId: calibration.activeRevisionId, context: { name: current.metadata.name, mode } });
+              await archiveGeneratedPhoto({ dataDir: dataDirectory, kind: "item", targetId: `import-${current.id}`, mode, bytes: imageBytes, activate: false, source: "import", status: "invalid", prompt, context: { name: current.metadata.name, mode } });
               throw failure;
             }
             const dimensions = await sharp(normalized).metadata();
             const validAspect = Math.abs((dimensions.width / dimensions.height) - 1.5) <= 0.02;
-            await archiveGeneratedPhoto({ dataDir: dataDirectory, kind: "item", targetId: `import-${current.id}`, mode, bytes: normalized, activate: false, source: "import", status: validAspect ? "accepted" : "invalid", prompt, promptRevisionId: calibration.activeRevisionId, context: { name: current.metadata.name, garmentIds: [`import-${current.id}`], mode, model: setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2")), modelDirection: setting("WARDROBE_MODEL_DIRECTION") } });
+            await archiveGeneratedPhoto({ dataDir: dataDirectory, kind: "item", targetId: `import-${current.id}`, mode, bytes: normalized, activate: false, source: "import", status: validAspect ? "accepted" : "invalid", prompt, context: { name: current.metadata.name, garmentIds: [`import-${current.id}`], mode, model, modelDirection: setting("WARDROBE_MODEL_DIRECTION") } });
             if (!validAspect) throw new Error("Modeled photo must be horizontal 3:2. Regenerate the complete set.");
             const name = `modeled-${stage.attempts}-${mode}-${batchId}.png`;
             await writeFile(path.join(dir, name), normalized);
@@ -783,7 +747,7 @@ export function wardrobeImportApi(options = {}) {
       }
       if (wardrobeItemMatch && req.method === "DELETE") {
         const id = wardrobeItemMatch[1];
-        await withLibraryLock(async () => {
+        await queueLibraryWrite(async () => {
           const records = await loadImported();
           const record = records.find((item) => item.id === id);
           if (!record) throw Object.assign(new Error("Imported wardrobe item not found"), { status: 404 });
@@ -969,7 +933,7 @@ export function wardrobeImportApi(options = {}) {
     }
   }
 
-  async function handler(req, res, next) {
+  async function routeWithJobLock(req, res, next) {
     const pathname = new URL(req.url, "http://localhost").pathname;
     const jobMatch = pathname.match(/^\/api\/import\/jobs\/([a-f0-9-]{36})(?:\/|$)/i);
     if (jobMatch) return withJobLock(jobMatch[1], () => handle(req, res, next));
@@ -989,14 +953,14 @@ export function wardrobeImportApi(options = {}) {
     apply: "serve",
     async configResolved(config) {
       root = config.root;
-      const dataDir = path.resolve(root, setting("WARDROBE_DATA_DIR", "data"));
+      const dataDir = resolveWardrobeDataDir(root, options.env?.WARDROBE_DATA_DIR);
       dataDirectory = dataDir;
       jobsDir = path.join(dataDir, "jobs");
       importedFile = path.join(dataDir, "library.json");
       libraryAssetDir = path.join(dataDir, "imported");
       await mkdir(jobsDir, { recursive: true });
       await mkdir(libraryAssetDir, { recursive: true });
-      await withLibraryLock(async () => {
+      await queueLibraryWrite(async () => {
         try {
           const records = JSON.parse(await readFile(importedFile, "utf8"));
           const normalized = records.map(normalizeWardrobeItem);
@@ -1039,7 +1003,7 @@ export function wardrobeImportApi(options = {}) {
         }
       }
     },
-    configureServer(server) { server.middlewares.use((req, res, next) => photoApi.handle(req, res, () => handler(req, res, next))); },
-    configurePreviewServer(server) { server.middlewares.use((req, res, next) => photoApi.handle(req, res, () => handler(req, res, next))); },
+    configureServer(server) { server.middlewares.use((req, res, next) => photoApi.handle(req, res, () => routeWithJobLock(req, res, next))); },
+    configurePreviewServer(server) { server.middlewares.use((req, res, next) => photoApi.handle(req, res, () => routeWithJobLock(req, res, next))); },
   };
 }

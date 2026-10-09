@@ -179,7 +179,6 @@ async function fixture(t, detected = [item()], seed = []) {
 test("AI layer eligibility leads to exactly two reviewed looks and one persistent wardrobe item", async (t) => {
   const f = await fixture(t);
   const [job] = await f.upload();
-  assert.equal(Object.hasOwn(job.metadata, "isShirt"), false);
   assert.equal(job.metadata.canLayer, true);
   assert.equal(job.metadata.layeringSource, "ai");
   assert.equal(job.metadata.part, "upperbody");
@@ -187,8 +186,6 @@ test("AI layer eligibility leads to exactly two reviewed looks and one persisten
   const schema = f.state.analysis[0].text.format.schema.properties.items.items;
   assert.equal(schema.properties.canLayer.type, "boolean");
   assert.ok(schema.required.includes("canLayer"));
-  assert.equal(Object.hasOwn(schema.properties, "isShirt"), false);
-  assert.equal(schema.required.includes("isShirt"), false);
   const analysisPrompt = f.state.analysis[0].input[0].content[0].text;
   assert.match(analysisPrompt, /flannel/i);
   assert.match(analysisPrompt, /dress shirt.*false/i);
@@ -226,7 +223,6 @@ test("AI layer eligibility leads to exactly two reviewed looks and one persisten
   assert.equal(record.layeringSource, "ai");
   assert.equal(record.modeledImages.length, 2);
   assert.equal(record.modeledImage, record.modeledImages[0].image);
-  assert.equal(record.modeledLayering.canLayer, true);
   for (const image of record.modeledImages) {
     const response = await fetch(`${f.url}${image.image}`);
     assert.equal(response.status, 200);
@@ -580,59 +576,43 @@ test("correcting a completed garment generates only its missing layer look and r
   assert.deepEqual(f.state.edits.slice(editCount).map((edit) => edit.mode), ["layer"]);
 });
 
-test("legacy shirt metadata and top modes migrate without replacing accepted photos or item identity", async (t) => {
+test("a single-photo item from before layering gains a layer look without replacing its photo or identity", async (t) => {
   const id = `import-${randomUUID()}`;
   const image = `/api/import/library/${id}-garment.png`;
   const modeledImage = `/api/import/library/${id}-modeled.png`;
   const f = await fixture(t, [], [{
-    ...item({ isShirt: true, canLayer: false }), id, image, thumbnail: image, modeledImage,
-    modeledImages: [{ id: "accepted-top", mode: "top", image: modeledImage }],
-    modeledLayering: { isShirt: true, canLayer: false, layeringSource: "ai" },
+    ...item({ canLayer: undefined }), id, image, thumbnail: image, modeledImage,
   }]);
   const oldPhoto = await png();
   await writeFile(path.join(f.dataDir, "imported", `${id}-garment.png`), await png(80, 100));
   await writeFile(path.join(f.dataDir, "imported", `${id}-modeled.png`), oldPhoto);
   const [legacy] = await f.library();
-  assert.equal(Object.hasOwn(legacy, "isShirt"), false);
-  assert.equal(Object.hasOwn(legacy.modeledLayering, "isShirt"), false);
-  assert.deepEqual(legacy.modeledImages, [{ id: "accepted-top", mode: "default", image: modeledImage }]);
+  assert.equal(legacy.canLayer, false);
+  assert.deepEqual(getModeledImages(legacy), [{ id: "modeled-default", mode: "default", image: modeledImage }]);
   const patched = await f.request(`/api/import/wardrobe/${id}`, "PATCH", { canLayer: true });
   assert.equal(patched.status, 200);
-  assert.equal(Object.hasOwn(patched.value, "isShirt"), false);
-  const persisted = JSON.parse(await readFile(path.join(f.dataDir, "library.json"), "utf8"));
-  assert.equal(JSON.stringify(persisted).includes('"isShirt"'), false);
   const created = await f.request(`/api/import/wardrobe/${id}/modeled`, "POST", {});
   assert.equal(created.status, 202);
-  assert.equal(Object.hasOwn(created.value.job.metadata, "isShirt"), false);
   const review = await f.waitFor(created.value.job.id, "modeled", "review");
   assert.deepEqual(f.state.edits.map((edit) => edit.mode), ["layer"]);
   assert.deepEqual(review.stages.modeled.images.map((entry) => entry.mode), ["default", "layer"]);
-  assert.equal(review.stages.modeled.images[0].id, "accepted-top");
-  assert.equal(Object.hasOwn(review.stages.modeled.generationLayering, "isShirt"), false);
+  assert.equal(review.stages.modeled.images[0].id, "modeled-default");
   assert.deepEqual(Buffer.from(await (await fetch(`${f.url}${review.stages.modeled.images[0].image}`)).arrayBuffer()), oldPhoto);
+  const photosRoute = `/api/import/photos/item/${id}`;
+  const [current] = (await f.request(photosRoute)).value.photos;
+  assert.equal((await f.request(`${photosRoute}/regenerate`, "POST", { mode: "default", expectedVersionId: current.versionId })).status, 202);
+  let regenerated;
+  for (const started = Date.now(); !regenerated && Date.now() - started < 6000; await new Promise((resolve) => setTimeout(resolve, 15))) {
+    const [photo] = (await f.request(photosRoute)).value.photos;
+    if (!photo.generating && photo.versionId !== current.versionId) regenerated = photo;
+  }
+  assert.ok(regenerated, "the standard photo regenerates while the layer look awaits review");
+  await assert.rejects(readFile(path.join(f.dataDir, "imported", `${id}-modeled.png`)), { code: "ENOENT" }, "the replaced copy is removed once the history keeps it");
+  assert.deepEqual(Buffer.from(await (await fetch(`${f.url}${current.image}`)).arrayBuffer()), oldPhoto, "the history keeps the replaced photo");
   assert.equal((await f.approveModeled(review)).status, 200);
   const [saved] = await f.library();
   assert.equal(saved.id, id);
+  assert.equal(saved.modeledImages[0].image, regenerated.image, "approving the layer look keeps the newer standard photo");
   assert.equal(saved.modeledImages.length, 2);
   assert.equal(saved.image, image);
-  assert.equal(Object.hasOwn(saved, "isShirt"), false);
-});
-
-test("stale provider and persisted job shirt flags are discarded by the general layer contract", async (t) => {
-  const f = await fixture(t, [item({ name: "Legacy Jacket", part: "wholebody_up", isShirt: false })]);
-  const [job] = await f.upload();
-  assert.equal(job.metadata.canLayer, true, "old shirt flags cannot gate a jacket's layer eligibility");
-  assert.equal(Object.hasOwn(job.metadata, "isShirt"), false);
-  const jobFile = path.join(f.dataDir, "jobs", job.id, "job.json");
-  const stale = JSON.parse(await readFile(jobFile, "utf8"));
-  stale.metadata.isShirt = false;
-  stale.stages.modeled.generationLayering = { isShirt: false, canLayer: true, layeringSource: "ai" };
-  stale.stages.modeled.images = [{ id: "legacy-top", mode: "top", image: "/api/import/library/legacy-photo.png" }];
-  await writeFile(jobFile, JSON.stringify(stale));
-  const reloaded = await f.newApi();
-  const response = await f.request(`/api/import/jobs/${job.id}`, "GET", undefined, reloaded);
-  assert.equal(response.status, 200);
-  assert.equal(Object.hasOwn(response.value.metadata, "isShirt"), false);
-  assert.equal(Object.hasOwn(response.value.stages.modeled.generationLayering, "isShirt"), false);
-  assert.equal(response.value.stages.modeled.images[0].mode, "default");
 });

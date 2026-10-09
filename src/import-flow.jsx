@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowCounterClockwise, Check, Plus, SpinnerGap, Trash, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { ModeledCarousel } from "./ModeledCarousel.jsx";
 import { LayeringControls } from "./LayeringControls.jsx";
-import { getModeledImages } from "./wardrobe-model.js";
+import { getModeledImages, normalizeLayering } from "./wardrobe-model.js";
 import "./import-flow.css";
 
 const API = "/api/import/jobs";
@@ -67,8 +67,7 @@ function defaultDraft(job) {
     color: metadata.color || "#d8d0c2",
     secondaryColor: metadata.secondaryColor || "",
     tags: Array.isArray(metadata.tags) ? metadata.tags.join(", ") : (metadata.tags || ""),
-    canLayer: metadata.canLayer === true,
-    layeringSource: metadata.layeringSource === "manual" ? "manual" : "ai",
+    ...normalizeLayering(metadata),
   };
 }
 
@@ -263,7 +262,7 @@ export function WardrobeImportFlow({ onGarmentApproved, onModeledApproved, reque
         if (action === "regenerate") setRegenerationPrompts((current) => ({ ...current, [`${job.id}:${stage}`]: "" }));
         if (stage === "modeled" && action === "approve") {
           const wardrobe = await api("/api/import/wardrobe");
-          const storedItem = wardrobe.find((item) => item.id === (job.libraryItemId || job.wardrobeItemId || `import-${job.id}`));
+          const storedItem = wardrobe.find((item) => item.id === `import-${job.id}`);
           if (storedItem) onModeledApproved?.(storedItem);
           else throw new Error("The modeled photos were saved, but the item could not be refreshed. Reload the wardrobe to see them.");
         }

@@ -4,9 +4,9 @@ import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { ModeledCarousel } from "./ModeledCarousel.jsx";
 import { LayeringControls } from "./LayeringControls.jsx";
-import { PhotoActions, PromptCalibrationControl, usePhotoCollection } from "./PhotoActions.jsx";
+import { PhotoActions, usePhotoCollection } from "./PhotoActions.jsx";
 import { OutfitGallery } from "./OutfitGallery.jsx";
-import { getExpectedModeledModes, getModeledImages } from "./wardrobe-model.js";
+import { getExpectedModeledModes, getModeledImages, normalizeLayering } from "./wardrobe-model.js";
 
 const STORAGE_KEY = "open-wardrobe-edits-v1";
 const DELETED_STORAGE_KEY = "open-wardrobe-deleted-v1";
@@ -44,7 +44,7 @@ function itemDraft(item) {
   return {
     name: item.name || "", part: item.part, color: item.color || "#9a9286",
     secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])],
-    canLayer: item.canLayer === true, layeringSource: item.layeringSource || "ai",
+    ...normalizeLayering(item),
   };
 }
 
@@ -344,7 +344,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
   );
 }
 
-function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
+function ItemViewer({ item, onClose, onPhotoChange, onSave, onDelete, onCreateModeled }) {
   const closeButtonRef = useRef(null);
   const imageRef = useRef(null);
   const samplingCanvasRef = useRef(null);
@@ -368,11 +368,10 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
   const savedModeledImages = getModeledImages(item);
   const expectedModes = getExpectedModeledModes(item);
   const defaultImage = savedModeledImages.find((image) => image.mode === "default");
-  const modeledImages = expectedModes.map((mode) => {
-    const currentPhoto = photoCollection.photos.find((photo) => photo.mode === mode);
-    const savedImage = savedModeledImages.find((image) => image.mode === mode);
-    return currentPhoto?.image ? { id: `modeled-${mode}`, mode, image: currentPhoto.image } : savedImage ? { ...savedImage, id: `modeled-${mode}` } : null;
-  }).filter(Boolean);
+  const modeledImages = expectedModes.flatMap((mode) => savedModeledImages.filter((image) => image.mode === mode).map((image) => ({ ...image, id: `modeled-${mode}` })));
+  useEffect(() => {
+    for (const photo of photoCollection.photos) onPhotoChange(item.id, photo.mode, photo.image);
+  }, [item.id, photoCollection.photos, onPhotoChange]);
   const activePhoto = photoCollection.photos.find((photo) => photo.mode === activePhotoMode);
   const hasModeledImage = modeledImages.length > 0;
   const canCreateModeledLooks = expectedModes.some((mode) => !savedModeledImages.some((image) => image.mode === mode));
@@ -397,7 +396,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onCreateModeled }) {
       color: item.color?.toLowerCase() || null,
       secondaryColor: item.secondaryColor?.toLowerCase() || null,
       tags: normalizedTags(item.tags || []),
-      canLayer: itemDraft(item).canLayer, layeringSource: itemDraft(item).layeringSource,
+      ...normalizeLayering(item),
     });
   }, [draft, item]);
 
@@ -646,7 +645,7 @@ export function App() {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || "Could not save these changes. Try again.");
-    const storedItem = result.item || result;
+    const storedItem = result;
     if (storedItem.id !== updatedItem.id) throw new Error("The wardrobe returned an incomplete item. Try saving again.");
     removePersistedEdit(updatedItem.id);
     setItems((current) => current.map((item) => item.id === updatedItem.id ? storedItem : item));
@@ -670,6 +669,16 @@ export function App() {
 
   const addImportedItem = useCallback((newItem) => {
     setItems((current) => current.some((item) => item.id === newItem.id) ? current : [...current, newItem]);
+  }, []);
+
+  // The server already saved the active photo; mirror it so the gallery stays current.
+  const updatePhoto = useCallback((id, mode, image) => {
+    setItems((current) => current.map((item) => {
+      const images = item.id === id ? getModeledImages(item) : [];
+      if (!images.some((entry) => entry.mode === mode && entry.image !== image)) return item;
+      const modeledImages = images.map((entry) => entry.mode === mode ? { ...entry, image } : entry);
+      return { ...item, modeledImages, modeledImage: modeledImages[0].image };
+    }));
   }, []);
 
   const attachImportedModeledImage = useCallback((storedItem) => {
@@ -697,7 +706,6 @@ export function App() {
             <nav className="collection-nav" aria-label="Choose collection">
               {[{ id: "wardrobe", label: "Wardrobe" }, { id: "outfits", label: "Outfits" }].map((tab) => <button key={tab.id} type="button" className={collectionTab === tab.id ? "active" : ""} aria-pressed={collectionTab === tab.id} onClick={() => { setCollectionTab(tab.id); setSelectedId(null); }}>{tab.label}</button>)}
             </nav>
-            <PromptCalibrationControl />
           </div>
           {collectionTab === "wardrobe" && <>
           <div className="gallery-meta-row">
@@ -739,7 +747,7 @@ export function App() {
         </>}
       </main>
 
-      {selectedItem && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onCreateModeled={createModeledLooks} />}
+      {selectedItem && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onPhotoChange={updatePhoto} onSave={saveItem} onDelete={deleteItem} onCreateModeled={createModeledLooks} />}
       <WardrobeImportFlow onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} requestedJob={requestedJob} onRequestedJobConsumed={consumeRequestedJob} />
     </div>
   );

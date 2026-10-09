@@ -11,7 +11,7 @@ Turn photos of worn clothing into source-faithful transparent catalog PNGs and m
 
 Obtain the source-image folder unless the user already supplied it. Resolve relative paths from the repository root. Confirm this is the Wardrobe repository by checking for `package.json`, `scripts/import-job-api.mjs`, and `data/` in `.gitignore`.
 
-Resolve the configured wardrobe directory as `$DATA` using [the shared directory instructions](../../../docs/image-history-for-agents.md#wardrobe-directory) before reading or importing catalog items. Keep all catalog, image-history and calibration operations in that directory.
+Resolve the configured wardrobe directory as `$DATA` using [the shared directory instructions](../../../docs/image-history-for-agents.md#wardrobe-directory) before reading or importing catalog items. Keep all catalog and image-history operations in that directory.
 
 At the start, check for the identity reference at `data/model-reference.png` or the local path configured by `WARDROBE_MODEL_REFERENCE`. If neither exists, ask: `Please provide a clear PNG reference photo of yourself for the modeled wardrobe images. What is its local path?` Do not begin modeled generation until the user supplies it. Keep the image local and never add it to Git.
 
@@ -150,7 +150,7 @@ Inspect checkerboard contact sheets of at most 12 items and compare sensitive re
 
 Use `data/model-reference.png` as the identity reference unless `WARDROBE_MODEL_REFERENCE` points to another local PNG. If neither exists, ask the user for a clear reference photo before continuing. Never add that photo to Git.
 
-Read [the shared image-history instructions](../../../docs/image-history-for-agents.md) before modeled generation: load active learned guidance, derive stable item IDs for failed-attempt archival, and record the exact prompt/revision/context.
+Read [the shared image-history instructions](../../../docs/image-history-for-agents.md) before modeled generation: derive stable item IDs for failed-attempt archival and record the exact prompt/context.
 
 For every accepted cutout, use Imagegen with the face identity first, any applicable body references next, then the exact garment PNG. Name the reference roles explicitly in the prompt. Save horizontal 3:2 PNGs in `$WORK/modeled/` and list them in `modeledFiles`:
 
@@ -177,7 +177,7 @@ Place the person in a tasteful real-world setting with warm professional natural
 Avoid hidden garment details, invented closures, fake text or logos, extra statement pieces, crossed arms, bags or scarves covering the item, cropped item extremities, extra people, text overlays, watermarks, product-mockup styling, or synthetic AI polish.
 ```
 
-Add the complete final prompt, actual `promptRevisionId` and optional generation `context` to each accepted `modeledFiles` entry; the importer archives those accepted files. Use fresh working filenames and archive every returned failed modeled attempt as rejected or invalid with `activate: false` before correcting it, following the shared instructions. Never discard or overwrite a previous modeled generation.
+Add the complete final prompt and optional generation `context` to each accepted `modeledFiles` entry; the importer archives those accepted files. Use fresh working filenames and archive every returned failed modeled attempt as rejected or invalid with `activate: false` before correcting it, following the shared instructions. Never discard or overwrite a previous modeled generation.
 
 Vary understated settings across a batch while keeping the identity and art direction cohesive. Compare every photo against its identity, body and garment references, and check the selected wearing mode and the exact one-or-two count. Regenerate identity drift, garment redesign, blocked inner tops, invented openings, anatomy failures, or incorrect framing.
 
@@ -194,7 +194,7 @@ node .agents/skills/import-clothes/scripts/import-to-wardrobe.mjs \
   --manifest "$WORK/manifest.json"
 ```
 
-The script validates the cutouts and exact modeled modes, copies immutable image assets into `$DATA/imported/`, archives accepted modeled files and their supplied prompt/revision/context in `$DATA/photo-history/`, preserves previous current photos, and updates `$DATA/library.json` under the same library lock as the web UI. Stable UUIDs from cutout content keep identical imports under one item; physical matching across different cutouts still requires source review. Saved manual layer suitability survives reimport. Metadata-only reimports preserve existing modeled images.
+The script validates the cutouts and exact modeled modes, copies cutouts into `$DATA/imported/`, archives accepted modeled files and their supplied prompt/context in `$DATA/photo-history/` (the record's modeled images point there), preserves previous current photos, and updates `$DATA/library.json` under the same library lock as the web UI. Stable UUIDs from cutout content keep identical imports under one item; physical matching across different cutouts still requires source review. Saved manual layer suitability survives reimport. Metadata-only reimports preserve existing modeled images.
 
 The database stores `modeledImages: [{id, mode, image}]` and keeps `modeledImage` as the first-image cover for compatibility. The side-panel carousel reads that image list. Validate the copied image count and one physical record per accepted item before declaring delivery complete.
 

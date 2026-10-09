@@ -31,7 +31,7 @@ test("agent importer archives replaced previews with exact prompts and never wri
   const item = { slug: "navy-shirt", file: "navy-shirt.png", name: "Navy Shirt", part: "upperbody", color: "#557788", secondaryColor: null, tags: [], status: "accepted", canLayer: false, layeringSource: "ai" };
   const writeManifest = (changes) => writeFile(manifestFile, JSON.stringify({ items: [{ ...item, ...changes }] }));
   const run = (...args) => spawnSync(process.execPath, [importer, "--repo", directory, "--items", path.join(directory, "items"), "--modeled", path.join(directory, "modeled"), "--manifest", manifestFile, ...args], { encoding: "utf8" });
-  await writeManifest({ modeledFiles: [{ mode: "default", file: "default.png", prompt: "First exact prompt", promptRevisionId: "default", context: { modelDirection: "User direction" } }] });
+  await writeManifest({ modeledFiles: [{ mode: "default", file: "default.png", prompt: "First exact prompt", context: { modelDirection: "User direction" } }] });
   const dry = run("--dry-run");
   assert.equal(dry.status, 0, dry.stderr);
   await assert.rejects(readFile(path.join(directory, "data", "photo-history", "index.json")), { code: "ENOENT" });
@@ -41,8 +41,8 @@ test("agent importer archives replaced previews with exact prompts and never wri
   const previous = JSON.parse(await readFile(libraryFile, "utf8"))[0];
   assert.match(previous.modeledImage, /^\/api\/import\/photo-history\/[a-f0-9]{64}\.png$/);
   await writeManifest({ canLayer: true, modeledFiles: [
-    { mode: "default", file: "new-default.png", prompt: "New default exact prompt", promptRevisionId: "default" },
-    { mode: "layer", file: "layer.png", prompt: "Exact layered prompt", promptRevisionId: "default", context: { innerLayer: "hoodie" } },
+    { mode: "default", file: "new-default.png", prompt: "New default exact prompt" },
+    { mode: "layer", file: "layer.png", prompt: "Exact layered prompt", context: { innerLayer: "hoodie" } },
   ] });
   const second = run();
   assert.equal(second.status, 0, second.stderr);
@@ -76,8 +76,8 @@ test("agent archive CLI retains rejected attempts and a replaced lookbook image 
   await writeFile(path.join(dataDir, "outfits.json"), JSON.stringify({ version: 1, outfits: [{ id: "navy-denim", name: "Navy Denim", image: "outfit-images/navy-denim.png", garmentIds: ["shirt", "jeans"] }] }));
   const manifestFile = path.join(directory, "archive.json");
   await writeFile(manifestFile, JSON.stringify({ photos: [
-    { kind: "outfit", targetId: "navy-denim", mode: "default", file: "modeled/rejected.png", status: "rejected", activate: false, prompt: "Bad generated prompt", promptRevisionId: "default", context: { qa: "Garment changed" } },
-    { kind: "outfit", targetId: "navy-denim", mode: "default", file: "modeled/layer.png", status: "accepted", activate: true, prompt: "Corrected prompt", promptRevisionId: "default", context: { garmentIds: ["shirt", "jeans"] } },
+    { kind: "outfit", targetId: "navy-denim", mode: "default", file: "modeled/rejected.png", status: "rejected", activate: false, prompt: "Bad generated prompt", context: { qa: "Garment changed" } },
+    { kind: "outfit", targetId: "navy-denim", mode: "default", file: "modeled/layer.png", status: "accepted", activate: true, prompt: "Corrected prompt", context: { garmentIds: ["shirt", "jeans"] } },
   ] }));
   const run = () => spawnSync(process.execPath, [archiveCli, "--data", dataDir, "--manifest", manifestFile], { encoding: "utf8" });
   const result = run();
@@ -89,12 +89,11 @@ test("agent archive CLI retains rejected attempts and a replaced lookbook image 
   assert.equal(target.versions.length, 3);
   assert.equal(target.versions[0].source, "legacy");
   assert.equal(target.versions[0].prompt, null);
-  assert.equal(target.versions[0].promptRevisionId, null);
   assert.equal(target.versions[1].status, "rejected");
   assert.equal(target.versions[1].context.qa, "Garment changed");
   assert.equal(target.activeVersionId, archived.photos[1].id);
   assert.deepEqual(await readFile(path.join(dataDir, "outfit-images", "navy-denim.png")), original);
-  await writeFile(manifestFile, JSON.stringify({ photos: [{ kind: "outfit", targetId: "navy-denim", mode: "default", file: "modeled/rejected.png", status: "rejected", activate: true, prompt: "Prompt", promptRevisionId: "default", context: {} }] }));
+  await writeFile(manifestFile, JSON.stringify({ photos: [{ kind: "outfit", targetId: "navy-denim", mode: "default", file: "modeled/rejected.png", status: "rejected", activate: true, prompt: "Prompt", context: {} }] }));
   assert.notEqual(run().status, 0);
   assert.equal(JSON.parse(await readFile(path.join(dataDir, "photo-history", "index.json"), "utf8")).targets[0].versions.length, 3);
 });

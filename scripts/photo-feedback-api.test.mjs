@@ -192,6 +192,8 @@ test("regeneration replaces only the selected mode and one-minute Undo survives 
   assert.notEqual(regenerated.image, original.image);
   assert.equal(hash(await f.bytes(regenerated.image)), hash(f.state.edits[0].output));
   assert.equal((await f.photos()).find((photo) => photo.mode === "layer").versionId, layer.versionId);
+  const libraryImages = async () => JSON.parse(await readFile(path.join(f.dataDir, "library.json"), "utf8")).find((item) => item.id === TOP_ID).modeledImages.map((image) => image.image);
+  assert.deepEqual(await libraryImages(), [regenerated.image, "/api/import/library/top-layer.png"], "library.json points at the accepted regeneration");
   assert.equal((await f.request(`${f.route()}/feedback`, "POST", { versionId: regenerated.versionId, rating: "down", comment: "This hem is less accurate." })).status, 200);
   f.state.now += 59000;
   const secondApi = await f.newApi();
@@ -200,6 +202,7 @@ test("regeneration replaces only the selected mode and one-minute Undo survives 
   assert.equal((await f.request(`${f.route()}/undo`, "POST", { mode: "default", expectedVersionId: regenerated.versionId }, secondApi)).status, 200);
   const undone = (await f.photos()).find((photo) => photo.mode === "default");
   assert.equal(undone.versionId, original.versionId);
+  assert.deepEqual(await libraryImages(), [original.image, "/api/import/library/top-layer.png"], "Undo restores the previous photo in library.json");
   assert.equal(undone.feedback.rating, "up");
   assert.equal(undone.versions.find((version) => version.id === regenerated.versionId).feedback.comment, "This hem is less accurate.");
   assert.equal(undone.undo, null);
@@ -295,7 +298,7 @@ test("a delayed web regeneration cannot replace a newer agent-approved image", a
   const agentVersion = await archiveGeneratedPhoto({
     dataDir: f.dataDir, kind: "item", targetId: TOP_ID, mode: "default",
     bytes: agentBytes, source: "agent", status: "accepted", activate: true,
-    prompt: "Newer agent-approved fixture prompt", promptRevisionId: "default",
+    prompt: "Newer agent-approved fixture prompt",
   });
   assert.equal((await f.photos()).find((photo) => photo.mode === "default").versionId, agentVersion.id);
   gate.release();
@@ -319,30 +322,23 @@ test("complete outfit regeneration uses every exact garment and body reference, 
   assert.equal(outfits.value[0].id, OUTFIT_ID);
   const [original] = await f.photos("outfit");
   assert.equal(hash(await f.bytes(original.image)), hash(f.assets["outfit.png"]));
-  const calibrated = await f.request("/api/import/prompt-calibration", "POST", { guidance: "Prefer a restrained charcoal background for readable layering.", reason: "The accepted baseline keeps the clothes easy to compare.", sourceVersionIds: [original.versionId], sourceEventIds: [] });
-  assert.equal(calibrated.status, 200);
   assert.equal((await f.request(`${f.route("outfit")}/regenerate`, "POST", { mode: "default", direction: "Show the inner tee clearly at the open placket.", expectedVersionId: original.versionId })).status, 202);
   const [generated] = await f.waitFor((photos) => !photos[0].generating && photos[0].versionId !== original.versionId, "outfit");
   const edit = f.state.edits[0];
   assert.equal(edit.size, "1024x1024");
   const provided = new Set(edit.files.map((file) => hash(file.bytes)));
   for (const name of ["face.png", "body-2.png", "body-3.png", "top.png", "bottom.png", "outer.png"]) assert.ok(provided.has(hash(f.assets[name])), `${name} must be sent unchanged to the provider`);
-  for (const text of ["Rust Cotton Tee", "Indigo Jeans", "Blue Flannel Overshirt", "long-leg", "inner tee clearly", "restrained charcoal background"]) assert.ok(edit.prompt.includes(text), text);
+  for (const text of ["Rust Cotton Tee", "Indigo Jeans", "Blue Flannel Overshirt", "long-leg", "inner tee clearly"]) assert.ok(edit.prompt.includes(text), text);
   const dimensions = await sharp(await f.bytes(generated.image)).metadata();
   assert.equal(dimensions.width, dimensions.height);
+  assert.equal((await f.request("/api/import/outfits")).value[0].image, generated.image, "outfits.json points at the accepted regeneration");
   const persisted = JSON.stringify(await f.history());
   assert.ok(persisted.includes("Show the inner tee clearly at the open placket."));
   assert.ok(persisted.includes(TOP_ID) && persisted.includes(BOTTOM_ID) && persisted.includes(OUTER_ID), "generation context keeps the selected garment IDs");
-  assert.equal(generated.versions.find((version) => version.id === generated.versionId).promptRevisionId, calibrated.value.activeRevisionId, "generated versions record the exact active prompt revision");
   assert.equal((await f.request(`${f.route("outfit")}/feedback`, "POST", { versionId: generated.versionId, rating: "up", comment: "Good balance and visible layers." })).status, 200);
   const reloaded = await f.photos("outfit", OUTFIT_ID, await f.newApi());
   assert.equal(reloaded[0].feedback.comment, "Good balance and visible layers.");
   assert.equal(hash(await f.bytes(original.image)), hash(f.assets["outfit.png"]));
-  const reset = await f.request("/api/import/prompt-calibration/reset", "POST", {});
-  assert.equal(reset.status, 200);
-  assert.equal(reset.value.activeRevisionId, "default");
-  assert.equal(reset.value.isDefault, true);
-  assert.equal(reset.value.revisions.length, 1, "reset retains the learned revision for comparison");
 });
 
 test("a complete outfit stays visible and rateable after one referenced garment is deleted", async (t) => {

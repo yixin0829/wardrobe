@@ -3,9 +3,6 @@
 .collection-nav button { min-height: 44px; border: 0; border-bottom: 2px solid transparent; padding: 5px 0; background: transparent; color: var(--muted); font-size: 20px; font-weight: 500; cursor: pointer; }
 .collection-nav button.active { color: var(--ink); border-bottom-color: var(--ink); }
 .collection-nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
-.prompt-calibration-control { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 11px; }
-.prompt-calibration-control button { min-height: 34px; border: 0; padding: 5px 0; background: none; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
-.prompt-calibration-control p { width: 100%; margin: 0; color: var(--accent); }
 .photo-actions { width: 100%; min-width: 0; }
 .photo-actions__heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .photo-actions__title { min-width: 0; margin: 0; font-size: 18px; font-weight: 520; line-height: 1.3; letter-spacing: -.015em; overflow-wrap: anywhere; }
@@ -18,11 +15,9 @@
 .photo-actions__regenerate.is-generating svg { animation: photo-actions-spin 900ms linear infinite; }
 @keyframes photo-actions-spin { to { transform: rotate(360deg); } }
 .photo-actions button:disabled,
-.photo-dialog button:disabled,
-.prompt-calibration-control button:disabled { opacity: .5; cursor: default; }
+.photo-dialog button:disabled { opacity: .5; cursor: default; }
 .photo-actions button:focus-visible,
-.photo-dialog button:focus-visible,
-.prompt-calibration-control button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.photo-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .photo-actions__announcement { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .photo-actions__undo { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 4px; font-size: 11px; }
 .photo-actions__undo button { display: inline-flex; align-items: center; gap: 5px; min-height: 23px; border: 0; padding: 3px 0; background: transparent; color: var(--accent); font-size: 12px; white-space: nowrap; cursor: pointer; }

@@ -132,7 +132,7 @@ try {
         const names = ["Blue Flannel Shirt", "Rust Cotton Tee", "Formal Dress Shirt", "Olive Zip Jacket"];
         const item = { name: names[index], part: index === 3 ? "wholebody_up" : "upperbody", color: ["#436377", "#b56543", "#d2dfdc", "#60765d"][index], secondaryColor: index === 0 ? "#879aa8" : null, tags: [index === 0 ? "flannel" : index === 1 ? "cotton" : index === 3 ? "zip" : "formal"], canLayer: index === 0 || index === 3, boundingBox: { x: 150, y: 100, width: 700, height: 790 } };
         const schema = request.text.format.schema.properties.items.items;
-        state.analysis.push({ name: item.name, part: item.part, canLayer: item.canLayer, schemaHasLayering: Boolean(schema.properties.canLayer), schemaHasShirt: Object.hasOwn(schema.properties, "isShirt") });
+        state.analysis.push({ name: item.name, part: item.part, canLayer: item.canLayer, schemaHasLayering: Boolean(schema.properties.canLayer) });
         return respond(res, 200, { output_text: JSON.stringify({ items: [item] }) });
       }
       if (req.url !== "/v1/images/edits") throw new Error("Unknown fixture provider route");

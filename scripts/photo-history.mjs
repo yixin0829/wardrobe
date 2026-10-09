@@ -1,13 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { withLibraryLock } from "./library-store.mjs";
-import { getModeledImages } from "../src/wardrobe-model.js";
+import { atomicJson, readJson, withLibraryLock } from "./library-store.mjs";
+import { getModeledImages, MODES } from "../src/wardrobe-model.js";
 
 export const PHOTO_ASSET_ROOT = "/api/import/photo-history";
 export const UNDO_MS = 60000;
+export const EMPTY_PHOTO_HISTORY = { version: 1, targets: [] };
 export const photoKey = (kind, targetId, mode) => `${kind}:${targetId}:${mode}`;
 export const imageDigest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+export function assertPhotoTarget({ kind, targetId, mode }) {
+  if (!["item", "outfit"].includes(kind) || typeof targetId !== "string" || !targetId || !MODES.has(mode)) throw new Error("Invalid photo target");
+}
 
 export function resolvePhotoFile(dataDir, image) {
   if (typeof image !== "string") throw new Error("A local photo is required");
@@ -22,27 +27,17 @@ export function resolvePhotoFile(dataDir, image) {
   throw new Error("Unsupported local photo path");
 }
 
-export async function atomicPhotoJson(file, value) {
-  await mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`);
-  await rename(temporary, file);
-}
-
 export function createPhotoHistoryStore(dataDir, now = Date.now) {
   const directory = path.join(dataDir, "photo-history");
   const file = path.join(directory, "index.json");
   const assets = path.join(directory, "assets");
   const time = () => new Date(now()).toISOString();
-  async function read() {
-    try { return JSON.parse(await readFile(file, "utf8")); }
-    catch (error) { if (error.code === "ENOENT") return { version: 1, targets: [] }; throw error; }
-  }
+  const read = () => readJson(file, EMPTY_PHOTO_HISTORY);
   async function transaction(operation) {
     return withLibraryLock(file, async () => {
       const history = await read();
       const result = await operation(history);
-      await atomicPhotoJson(file, history);
+      await atomicJson(file, history);
       return result;
     });
   }
@@ -58,11 +53,11 @@ export function createPhotoHistoryStore(dataDir, now = Date.now) {
     await mkdir(assets, { recursive: true });
     const sha256 = imageDigest(bytes);
     await writeFile(path.join(assets, `${sha256}.png`), bytes, { flag: "wx" }).catch((error) => { if (error.code !== "EEXIST") throw error; });
-    const fields = Object.fromEntries(["status", "source", "prompt", "promptRevisionId", "context"].filter((key) => Object.hasOwn(metadata, key)).map((key) => [key, metadata[key]]));
+    const fields = Object.fromEntries(["status", "source", "prompt", "context"].filter((key) => Object.hasOwn(metadata, key)).map((key) => [key, metadata[key]]));
     const version = {
       id: randomUUID(), image: `${PHOTO_ASSET_ROOT}/${sha256}.png`, sha256,
       createdAt: time(), status: "accepted", source: "legacy", prompt: null,
-      promptRevisionId: null, context: {}, feedback: null, ...fields,
+      context: {}, feedback: null, ...fields,
     };
     entry.versions.push(version);
     return version;
@@ -89,13 +84,17 @@ export function createPhotoHistoryStore(dataDir, now = Date.now) {
 
 export async function captureCurrentPhoto({ dataDir, kind, targetId, mode = "default", image, context = {}, now = Date.now }) {
   const bytes = await readFile(resolvePhotoFile(dataDir, image));
-  const signature = `${image}:${imageDigest(bytes)}`;
+  const sha256 = imageDigest(bytes);
+  const signature = `${image}:${sha256}`;
   const store = createPhotoHistoryStore(dataDir, now);
+  // Most reads find the photo already captured; skip the locked index rewrite.
+  const captured = store.target(await store.read(), kind, targetId, mode, false);
+  if (captured?.sourceSignature === signature) return store.publicPhoto(captured);
   return store.transaction(async (history) => {
     const entry = store.target(history, kind, targetId, mode);
     if (entry.sourceSignature !== signature) {
       const known = entry.versions.find((version) => version.image === image && version.status === "accepted")
-        || [...entry.versions].reverse().find((version) => version.sha256 === imageDigest(bytes) && version.status === "accepted");
+        || [...entry.versions].reverse().find((version) => version.sha256 === sha256 && version.status === "accepted");
       const version = known || await store.archive(entry, bytes, { context });
       entry.activeVersionId = version.id;
       entry.sourceSignature = signature;
@@ -107,12 +106,8 @@ export async function captureCurrentPhoto({ dataDir, kind, targetId, mode = "def
 
 // Call before replacing an agent-generated collection or deleting source assets.
 export async function archiveExistingPhotos({ dataDir, now = Date.now }) {
-  const readOptional = async (file, fallback) => {
-    try { return JSON.parse(await readFile(path.join(dataDir, file), "utf8")); }
-    catch (error) { if (error.code === "ENOENT") return fallback; throw error; }
-  };
-  const items = await readOptional("library.json", []);
-  const collection = await readOptional("outfits.json", { outfits: [] });
+  const items = await readJson(path.join(dataDir, "library.json"), []);
+  const collection = await readJson(path.join(dataDir, "outfits.json"), { outfits: [] });
   for (const item of items) {
     for (const photo of getModeledImages(item)) {
       try { await captureCurrentPhoto({ dataDir, now, kind: "item", targetId: item.id, mode: photo.mode, image: photo.image, context: { name: item.name, part: item.part, canLayer: item.canLayer } }); }
@@ -128,14 +123,13 @@ export async function archiveExistingPhotos({ dataDir, now = Date.now }) {
 
 // Agent generation and the web API share the same immutable image ledger.
 // This lock is in photo-history/, independent of the wardrobe library lock.
-export async function archiveGeneratedPhoto({ dataDir, kind, targetId, mode = "default", sourceFile, bytes, activate = false, ...metadata }) {
-  if (!["item", "outfit"].includes(kind) || typeof targetId !== "string" || !targetId || !["default", "layer"].includes(mode)) throw new Error("Invalid photo target");
+export async function archiveGeneratedPhoto({ dataDir, kind, targetId, mode = "default", bytes, activate = false, ...metadata }) {
+  assertPhotoTarget({ kind, targetId, mode });
   if (activate && metadata.status && metadata.status !== "accepted") throw new Error("Only accepted photos can be activated");
   const store = createPhotoHistoryStore(path.resolve(dataDir));
-  const content = bytes || await readFile(sourceFile);
   return store.transaction(async (history) => {
     const entry = store.target(history, kind, targetId, mode);
-    const version = await store.archive(entry, content, { source: "agent", ...metadata });
+    const version = await store.archive(entry, bytes, { source: "agent", ...metadata });
     if (activate) { entry.activeVersionId = version.id; entry.undo = null; }
     return version;
   });

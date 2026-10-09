@@ -1,18 +1,16 @@
 #!/usr/bin/env node
 
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import sharp from "sharp";
-import { getExpectedModeledModes, getModeledImages, normalizeLayering, normalizeWardrobeItem } from "../../../../src/wardrobe-model.js";
-import { withLibraryLock } from "../../../../scripts/library-store.mjs";
-import { archiveExistingPhotos, archiveGeneratedPhoto } from "../../../../scripts/photo-history.mjs";
+import { getExpectedModeledModes, getModeledImages, MODES, normalizeLayering, normalizeWardrobeItem } from "../../../../src/wardrobe-model.js";
+import { atomicJson, readJson, withLibraryLock } from "../../../../scripts/library-store.mjs";
+import { archiveExistingPhotos, archiveGeneratedPhoto, imageDigest } from "../../../../scripts/photo-history.mjs";
 import { resolveWardrobeDataDir } from "../../../../scripts/wardrobe-paths.mjs";
 
 const PARTS = new Set(["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
 const HEX = /^#[0-9a-f]{6}$/i;
-const MODES = new Set(["layer", "default"]);
 
 function usage(message) {
   if (message) console.error(`Error: ${message}\n`);
@@ -78,13 +76,12 @@ function normalizeItem(item) {
     if (!Array.isArray(item.modeledFiles)) throw new Error(`${slug}: modeledFiles must be an array`);
     const modes = new Set();
     modeledFiles = item.modeledFiles.map((entry) => {
-      const mode = entry?.mode === "top" ? "default" : entry?.mode;
+      const mode = entry?.mode;
       if (!MODES.has(mode) || modes.has(mode)) throw new Error(`${slug}: modeledFiles must have unique valid modes`);
       modes.add(mode);
       if (entry.prompt !== undefined && entry.prompt !== null && (typeof entry.prompt !== "string" || entry.prompt.length > 60000)) throw new Error(`${slug}: modeled prompt must be text or null`);
-      if (entry.promptRevisionId !== undefined && entry.promptRevisionId !== null && typeof entry.promptRevisionId !== "string") throw new Error(`${slug}: modeled prompt revision ID must be text or null`);
       if (entry.context !== undefined && (!entry.context || typeof entry.context !== "object" || Array.isArray(entry.context))) throw new Error(`${slug}: modeled context must be an object`);
-      return { mode, file: localPng(entry.file, slug, "modeledFiles.file"), prompt: entry.prompt ?? null, promptRevisionId: entry.promptRevisionId ?? null, context: entry.context || {} };
+      return { mode, file: localPng(entry.file, slug, "modeledFiles.file"), prompt: entry.prompt ?? null, context: entry.context || {} };
     });
   } else if (item.modeledFile) {
     modeledFiles = [{ mode: null, file: localPng(item.modeledFile, slug, "modeledFile") }];
@@ -113,7 +110,7 @@ async function validatePng(file, slug) {
   const stats = await image.stats();
   const alpha = stats.channels[3];
   if (!alpha || alpha.min !== 0 || alpha.max === 0) throw new Error(`${slug}: PNG must contain transparent and visible pixels`);
-  return { bytes, hash: createHash("sha256").update(bytes).digest("hex") };
+  return { bytes, hash: imageDigest(bytes) };
 }
 
 async function validateModeledPng(file, slug) {
@@ -121,20 +118,7 @@ async function validateModeledPng(file, slug) {
   const metadata = await sharp(bytes).metadata();
   if (metadata.format !== "png") throw new Error(`${slug}: ${path.basename(file)} is not a PNG`);
   if (!metadata.width || !metadata.height) throw new Error(`${slug}: modeled PNG has invalid dimensions`);
-  return { bytes, hash: createHash("sha256").update(bytes).digest("hex") };
-}
-
-async function readJson(file, fallback) {
-  try { return JSON.parse(await readFile(file, "utf8")); }
-  catch (error) { if (error.code === "ENOENT") return fallback; throw error; }
-}
-
-async function atomicJson(file, value) {
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
-    await rename(temporary, file);
-  } finally { await rm(temporary, { force: true }); }
+  return { bytes };
 }
 
 async function writeAsset(file, bytes) {
@@ -201,22 +185,36 @@ async function importRecords() {
   if (!Array.isArray(records)) throw new Error(`${libraryFile} must contain a JSON array`);
 
   const nextRecords = records.map(normalizeWardrobeItem);
-  for (const item of prepared) {
-    const assetUrl = `/api/import/library/${item.assetName}`;
-    const existingIndex = nextRecords.findIndex((entry) => entry.id === item.id);
-    const existing = existingIndex === -1 ? null : nextRecords[existingIndex];
+  // Validate every item's modes before writing any asset or history version.
+  const planned = prepared.map((item) => {
+    const existing = nextRecords.find((entry) => entry.id === item.id);
     const layering = normalizeLayering(item, existing || {});
     const modes = previewModes(item, layering, existing);
-    item.models = item.models.map((model, index) => ({
-      ...model,
-      mode: modes[index],
-      assetName: `${item.id}-modeled-${modes[index]}-${model.hash}.png`,
-    }));
-    const modeledImages = item.models.length ? item.models.map((model) => ({
-      id: `${item.id}-${model.mode}`,
-      mode: model.mode,
-      image: `/api/import/library/${model.assetName}`,
-    })).sort((first, second) => (first.mode === "layer") - (second.mode === "layer")) : getModeledImages(existing || {});
+    const models = item.models.map((model, index) => ({ ...model, mode: modes[index] }))
+      .sort((first, second) => (first.mode === "layer") - (second.mode === "layer"));
+    return { item, existing, layering, models };
+  });
+
+  if (!options.dryRun) {
+    await archiveExistingPhotos({ dataDir });
+    await mkdir(importedDir, { recursive: true });
+  }
+  for (const { item, existing, layering, models } of planned) {
+    let modeledImages = getModeledImages(existing || {});
+    if (!options.dryRun) {
+      await writeAsset(path.join(importedDir, item.assetName), item.bytes);
+      if (models.length) modeledImages = [];
+      for (const model of models) {
+        const version = await archiveGeneratedPhoto({
+          dataDir, kind: "item", targetId: item.id, mode: model.mode,
+          bytes: model.bytes, source: "agent", status: "accepted", activate: false,
+          prompt: model.prompt ?? null,
+          context: { ...model.context, name: item.name, part: item.part, canLayer: layering.canLayer },
+        });
+        modeledImages.push({ id: `${item.id}-${model.mode}`, mode: model.mode, image: version.image });
+      }
+    }
+    const assetUrl = `/api/import/library/${item.assetName}`;
     const record = {
       id: item.id,
       name: item.name,
@@ -230,48 +228,23 @@ async function importRecords() {
       ...layering,
       modeledImages,
       modeledImage: modeledImages[0]?.image || null,
-      ...(item.models.length ? { modeledLayering: { ...layering } } : {}),
       importJobId: item.uuid,
     };
-    if (existingIndex === -1) nextRecords.push(record);
-    else nextRecords[existingIndex] = { ...nextRecords[existingIndex], ...record };
+    if (existing) nextRecords[nextRecords.indexOf(existing)] = { ...existing, ...record };
+    else nextRecords.push(record);
   }
 
-  if (!options.dryRun) {
-    await archiveExistingPhotos({ dataDir });
-    await mkdir(importedDir, { recursive: true });
-    for (const item of prepared) {
-      await writeAsset(path.join(importedDir, item.assetName), item.bytes);
-      const modeledImages = [];
-      for (const model of item.models) {
-        await writeAsset(path.join(importedDir, model.assetName), model.bytes);
-        const version = await archiveGeneratedPhoto({
-          dataDir, kind: "item", targetId: item.id, mode: model.mode,
-          bytes: model.bytes, source: "agent", status: "accepted", activate: false,
-          prompt: model.prompt ?? null, promptRevisionId: model.promptRevisionId ?? null,
-          context: { ...model.context, name: item.name, part: item.part, canLayer: normalizeLayering(item, nextRecords.find((entry) => entry.id === item.id)).canLayer },
-        });
-        modeledImages.push({ id: `${item.id}-${model.mode}`, mode: model.mode, image: version.image });
-      }
-      if (modeledImages.length) {
-        modeledImages.sort((first, second) => (first.mode === "layer") - (second.mode === "layer"));
-        const record = nextRecords.find((entry) => entry.id === item.id);
-        record.modeledImages = modeledImages;
-        record.modeledImage = modeledImages[0].image;
-      }
-    }
-    await atomicJson(libraryFile, nextRecords);
-  }
-  return nextRecords;
+  if (!options.dryRun) await atomicJson(libraryFile, nextRecords);
+  return { nextRecords, planned };
 }
 
 // Re-read manual choices while holding the same cross-process lock as the UI.
-const nextRecords = await withLibraryLock(libraryFile, importRecords);
+const { nextRecords, planned } = await withLibraryLock(libraryFile, importRecords);
 
 console.log(JSON.stringify({
   dryRun: options.dryRun,
   imported: prepared.length,
   total: nextRecords.length,
   library: libraryFile,
-  items: prepared.map(({ id, name, part, assetName, models }) => ({ id, name, part, assetName, modeledAssetNames: models.map((model) => model.assetName) })),
+  items: planned.map(({ item, models }) => ({ id: item.id, name: item.name, part: item.part, assetName: item.assetName, modeledModes: models.map((model) => model.mode) })),
 }, null, 2));

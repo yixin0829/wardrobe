@@ -1,10 +1,29 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import { mkdir, open, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const HOST = hostname();
 const WAIT_LIMIT_MS = 10000;
+
+export async function readJson(file, fallback) {
+  try { return JSON.parse(await readFile(file, "utf8")); }
+  catch (error) { if (error.code === "ENOENT") return structuredClone(fallback); throw error; }
+}
+
+export async function atomicJson(file, value) {
+  await mkdir(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
+    try { await rename(temporary, file); }
+    catch (error) {
+      // Windows can refuse to replace a file another process has open.
+      if (!["EBUSY", "EXDEV", "EPERM"].includes(error.code)) throw error;
+      await copyFile(temporary, file);
+    }
+  } finally { await rm(temporary, { force: true }); }
+}
 
 async function readOwner(file) {
   try { return JSON.parse(await readFile(file, "utf8")); }

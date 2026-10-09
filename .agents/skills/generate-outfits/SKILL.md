@@ -50,7 +50,7 @@ If the wardrobe cannot support the requested number of genuinely distinct outfit
 
 ## 2. Curate the combinations
 
-Read active calibration with `node scripts/calibrate-outfit-prompts.mjs --data "$DATA" --show` before selecting combinations. Apply supported learned styling preferences to wardrobe pairing where they fit the exact available garments and the user's current direction. Retain this guidance and its revision ID for the batch's image prompts; regeneration of an existing outfit keeps its exact selected pieces.
+Regeneration of an existing outfit keeps its exact selected pieces.
 
 Each outfit must contain exactly one inner or standalone top and one bottom, with an optional suitable outer layer, shoes and restrained accessory. Style with the judgment of an experienced menswear stylist: choose combinations for their fit, proportion, color, texture and occasion. The aim is fashionable, well-balanced layering.
 
@@ -104,7 +104,7 @@ Create one generation package per outfit:
 
 The primary identity reference controls the face. If present, include `model-reference-2.png` and `model-reference-3.png` beside it for body proportions and apply the user's current model direction or configured `WARDROBE_MODEL_DIRECTION`. Otherwise preserve the identity proportions. When the tool's reference limit requires it, make a temporary labeled identity board with the untouched face and body references; keep every selected garment reference in the generation package.
 
-Read [references/outfit-image-prompt.md](references/outfit-image-prompt.md) and fill its template from the exact outfit record. Follow [the shared image-history instructions](../../../docs/image-history-for-agents.md) to append the batch's active guidance, record the exact prompt/revision/context, and retain every generated attempt. Inspect every outer-layer reference before choosing the layered clause; never infer a zipper, buttons, placket, opening, or closure.
+Read [references/outfit-image-prompt.md](references/outfit-image-prompt.md) and fill its template from the exact outfit record. Follow [the shared image-history instructions](../../../docs/image-history-for-agents.md) to record the exact prompt/context and retain every generated attempt. Inspect every outer-layer reference before choosing the layered clause; never infer a zipper, buttons, placket, opening, or closure.
 
 Use the recorded garment roles/modes explicitly: `default` is the normal presentation; `layer` places the piece over the exact selected inner top, keeping both visibly identifiable. A real button or zip opening may be open or partly open; pullovers remain closed. Keep true garment lengths, proportions and construction.
 
@@ -137,12 +137,12 @@ Regenerate identity drift, missing or redesigned garments, fake closures or text
 
 After all requested outfits pass:
 
-1. Archive every accepted outfit with `scripts/archive-modeled-photos.mjs`, `kind: "outfit"`, its stable outfit ID, `mode: "default"`, the exact prompt/revision/context and `activate: true`, following [the shared image-history instructions](../../../docs/image-history-for-agents.md). The CLI preserves existing legacy current photos first.
+1. Archive every accepted outfit with `scripts/archive-modeled-photos.mjs`, `kind: "outfit"`, its stable outfit ID, `mode: "default"`, the exact prompt/context and `activate: true`, following [the shared image-history instructions](../../../docs/image-history-for-agents.md). The CLI preserves existing legacy current photos first.
 2. Set each accepted outfit's `image` to the immutable `/api/import/photo-history/...png` URL returned for that attempt. Do not overwrite or delete an earlier outfit image.
 3. Atomically write the exact requested current collection to `$DATA/outfits.json` under the shared library lock. All old versions and their feedback remain in the separate history ledger.
 4. Reopen every archived current PNG and verify that current unique outfit IDs, accepted manifest records and requested count agree. Also verify failed attempts remain inactive.
 
-Verify the outfit view after the manifest change. The current collection supports per-image regeneration and feedback; a later prompt calibration affects future generations while keeping every original generation and prompt unchanged.
+Verify the outfit view after the manifest change. The current collection supports per-image regeneration and feedback while keeping every original generation and prompt unchanged.
 
 ## Finish
 

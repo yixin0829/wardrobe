@@ -31,12 +31,11 @@ Open [localhost:5173](http://localhost:5173).
 
 ## Import with Codex
 
-This repo includes Codex skills to import clothes, generate complete outfits, and calibrate generation guidance from your image feedback.
+This repo includes Codex skills to import clothes and generate complete outfits.
 
 ```text
 $import-clothes Import the clothes from ~/Pictures/outfits, create modeled photos, and add them to this wardrobe.
 $generate-outfits Create modeled outfit ideas from my wardrobe.
-$calibrate-outfit-prompts Review my outfit image feedback and improve the generation guidance.
 ```
 
 Open the cloned repo in Codex and run a prompt. The import skill asks for a local model-reference PNG when needed, reviews every cutout and modeled photo, then writes to `data/library.json` and `data/imported/`. The outfit skill asks how many looks to create, then curates, generates, verifies, and saves the complete collection under `data/`.
@@ -50,10 +49,6 @@ Complete outfits use thoughtful menswear styling: fit, proportion, color, textur
 ### Regenerate and give feedback
 
 Modeled clothing previews and complete outfits support **Regenerate** and image-specific thumbs up/down with a comment. After a successful regeneration, **Undo** remains available for one minute, including after a page reload. Reverting restores the previous image without deleting the new version. Every generated version and its available prompt/context stay in `data/photo-history/`, alongside ratings, comments, regeneration and undo events.
-
-Use [$calibrate-outfit-prompts](.agents/skills/calibrate-outfit-prompts/SKILL.md) to review those local comparisons and save learned preferences for future generations. Explicit ratings carry more weight than the weaker signal of choosing to regenerate or undo. Calibration supplements the original prompts while preserving identity, exact garments, user model direction and generation counts; it does not fine-tune a model or trigger new paid images automatically. Ask the skill to **restore default prompts** to deactivate learned guidance while keeping the complete revision and image history.
-
-For a direct local reset, run `node scripts/calibrate-outfit-prompts.mjs --reset`. The same script supports `--show`, `--export <new-file.json>` and `--apply <draft.json>`, with optional `--data <directory>` for a configured data location.
 
 ### For agents
 

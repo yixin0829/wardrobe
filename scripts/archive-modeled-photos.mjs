@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { archiveExistingPhotos, archiveGeneratedPhoto } from "./photo-history.mjs";
+import { archiveExistingPhotos, archiveGeneratedPhoto, assertPhotoTarget } from "./photo-history.mjs";
 import { resolveWardrobeDataDir } from "./wardrobe-paths.mjs";
 
 const usage = "Usage: node scripts/archive-modeled-photos.mjs [--data <directory>] --manifest <file.json>";
@@ -23,15 +23,14 @@ async function main(argv) {
   const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
   if (!Array.isArray(manifest.photos) || !manifest.photos.length) throw new Error("Manifest must contain a nonempty photos array");
   const prepared = await Promise.all(manifest.photos.map(async (photo) => {
-    if (!["item", "outfit"].includes(photo?.kind) || typeof photo.targetId !== "string" || !photo.targetId || !["default", "layer"].includes(photo.mode)) throw new Error("Invalid photo target");
+    assertPhotoTarget(photo ?? {});
     if (!["accepted", "rejected", "invalid"].includes(photo.status) || typeof photo.activate !== "boolean" || (photo.activate && photo.status !== "accepted")) throw new Error("Only accepted photos can be activated; every photo needs status and activate");
     if (typeof photo.file !== "string" || !photo.file) throw new Error("Each photo needs a local file");
     if (!(photo.prompt === null || typeof photo.prompt === "string")) throw new Error("Each photo needs its exact prompt, or null when unknown");
-    if (!(photo.promptRevisionId === null || typeof photo.promptRevisionId === "string")) throw new Error("Each photo needs its prompt revision ID, or null when unknown");
     if (!photo.context || typeof photo.context !== "object" || Array.isArray(photo.context)) throw new Error("Each photo needs generation context");
     const sourceFile = path.resolve(path.dirname(manifestFile), photo.file);
     const bytes = await readFile(sourceFile);
-    return { dataDir, kind: photo.kind, targetId: photo.targetId, mode: photo.mode, bytes, prompt: photo.prompt, promptRevisionId: photo.promptRevisionId, context: photo.context, status: photo.status, activate: photo.activate, source: photo.source === "legacy" ? "legacy" : "agent" };
+    return { dataDir, kind: photo.kind, targetId: photo.targetId, mode: photo.mode, bytes, prompt: photo.prompt, context: photo.context, status: photo.status, activate: photo.activate, source: photo.source === "legacy" ? "legacy" : "agent" };
   }));
   await archiveExistingPhotos({ dataDir });
   const photos = [];

@@ -203,31 +203,3 @@ export function PhotoActions({ title, collection, photo, disabled = false, disab
     </section>
   );
 }
-
-export function PromptCalibrationControl() {
-  const [calibration, setCalibration] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/import/prompt-calibration", { cache: "no-store", signal: controller.signal })
-      .then((response) => response.ok ? response.json() : null)
-      .then(setCalibration)
-      .catch(() => {});
-    return () => controller.abort();
-  }, []);
-  const reset = async () => {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const response = await fetch("/api/import/prompt-calibration/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "Could not restore the default styling.");
-      setCalibration(result);
-    } catch (requestError) { setError(requestError.message); }
-    finally { setBusy(false); }
-  };
-  if (!calibration || calibration.isDefault) return null;
-  return <div className="prompt-calibration-control"><span>Personalized styling is active.</span><button type="button" disabled={busy} onClick={reset}>{busy ? "Restoring…" : "Restore default styling"}</button>{error && <p role="alert">{error}</p>}</div>;
-}

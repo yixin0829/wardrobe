@@ -10,7 +10,7 @@ Run `npm run e2e:serve`, open the reported local URL in a fresh browser, and use
 
 ## Observed results
 
-All 38 automated tests and the production build pass. All three wardrobe skills pass the standard skill validator. Integration checks additionally cover stale generation results, failed follow-up Undo preservation, deleted garments, invalid returned images, configured wardrobe directories and calibration reset without losing evidence.
+All 32 automated tests and the production build pass. Integration checks additionally cover stale generation results, failed follow-up Undo preservation, deleted garments, invalid returned images and configured wardrobe directories.
 
 | Check | Result |
 | --- | --- |

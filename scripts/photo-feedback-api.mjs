@@ -1,33 +1,57 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { getModeledImages } from "../src/wardrobe-model.js";
-import { archiveExistingPhotos, captureCurrentPhoto, createPhotoHistoryStore, imageDigest, PHOTO_ASSET_ROOT, resolvePhotoFile, UNDO_MS } from "./photo-history.mjs";
-import { applyPromptCalibration, getPromptCalibration, resetPromptCalibration } from "./prompt-calibration.mjs";
+import { getModeledImages, MODES } from "../src/wardrobe-model.js";
+import { body, json } from "./http-json.mjs";
+import { atomicJson, readJson as readJsonFile, withLibraryLock } from "./library-store.mjs";
+import { archiveExistingPhotos, captureCurrentPhoto, createPhotoHistoryStore, imageDigest, resolvePhotoFile, UNDO_MS } from "./photo-history.mjs";
 
 const error = (message, status = 400) => Object.assign(new Error(message), { status });
-function json(res, status, value) {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-  res.end(JSON.stringify(value));
-}
-async function body(req) {
-  const chunks = []; let length = 0;
-  for await (const chunk of req) { length += chunk.length; if (length > 16000) throw error("Request is too large"); chunks.push(chunk); }
-  try { const value = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {}; if (!value || typeof value !== "object" || Array.isArray(value)) throw error("Expected a JSON object"); return value; }
-  catch { throw error("Expected JSON"); }
-}
+const garmentContext = (garments) => ({ garmentIds: garments.map((piece) => piece.id), garmentModes: garments.map((piece) => ({ garmentId: piece.id, role: piece.role, mode: piece.mode })) });
+const BODY_LIMIT = 16000;
 
 export function createPhotoFeedbackApi({ root, dataDir, env = {}, now = Date.now, buildItemPrompt, editImage }) {
   const store = createPhotoHistoryStore(dataDir, now);
   const setting = (name, fallback = "") => env[name] || process.env[name] || fallback;
-  async function readJson(file, fallback) {
-    try { return JSON.parse(await readFile(path.join(dataDir, file), "utf8")); }
-    catch (failure) { if (failure.code === "ENOENT") return fallback; throw failure; }
+  const readJson = (file, fallback) => readJsonFile(path.join(dataDir, file), fallback);
+  // Hold the wardrobe lock before the history lock, matching the importers.
+  const withWardrobeLock = (operation) => withLibraryLock(path.join(dataDir, "library.json"), operation);
+  // A replaced item photo in imported/ is a duplicate once the history holds its bytes.
+  async function removeReplacedCopy(library, itemId, image) {
+    if (!image?.startsWith(`/api/import/library/${itemId}-`)) return;
+    if (library.some((piece) => [piece.image, piece.thumbnail, ...getModeledImages(piece).map((entry) => entry.image)].includes(image))) return;
+    const file = resolvePhotoFile(dataDir, image);
+    const bytes = await readFile(file).catch((failure) => { if (failure.code === "ENOENT") return null; throw failure; });
+    if (!bytes || !existsSync(path.join(store.assets, `${imageDigest(bytes)}.png`))) return;
+    await rm(file, { force: true });
+  }
+  // Point the wardrobe record at the active version, so library.json and
+  // outfits.json readers see the same photo as the history. Callers hold both locks.
+  async function activate(entry, version) {
+    entry.activeVersionId = version.id;
+    entry.sourceSignature = `${version.image}:${version.sha256}`;
+    if (entry.kind === "item") {
+      const library = await readJson("library.json", []);
+      const item = library.find((piece) => piece.id === entry.targetId);
+      if (!item) return;
+      const replaced = getModeledImages(item).find((image) => image.mode === entry.mode)?.image;
+      item.modeledImages = getModeledImages(item).map((image) => image.mode === entry.mode ? { ...image, image: version.image } : image);
+      item.modeledImage = item.modeledImages[0].image;
+      await atomicJson(path.join(dataDir, "library.json"), library);
+      await removeReplacedCopy(library, entry.targetId, replaced);
+    } else {
+      const collection = await readJson("outfits.json", { outfits: [] });
+      const outfit = (collection.outfits || []).find((look) => look.id === entry.targetId);
+      if (!outfit) return;
+      outfit.image = version.image;
+      await atomicJson(path.join(dataDir, "outfits.json"), collection);
+    }
   }
   async function context(kind, targetId, mode = "default", requireGarments = false) {
-    if (!["default", "layer"].includes(mode) || (kind === "outfit" && mode !== "default")) throw error("Invalid photo mode");
+    if (!MODES.has(mode) || (kind === "outfit" && mode !== "default")) throw error("Invalid photo mode");
     const library = await readJson("library.json", []);
     if (kind === "item") {
       const item = library.find((piece) => piece.id === targetId);
@@ -56,7 +80,7 @@ export function createPhotoFeedbackApi({ root, dataDir, env = {}, now = Date.now
   async function ensure(kind, targetId) {
     const current = await context(kind, targetId);
     for (const image of current.sources) {
-      await captureCurrentPhoto({ dataDir, kind, targetId, mode: image.mode, image: image.image, now, context: { name: current.name, garmentIds: current.garments.map((piece) => piece.id), garmentModes: current.garments.map((piece) => ({ garmentId: piece.id, role: piece.role, mode: piece.mode })) } });
+      await captureCurrentPhoto({ dataDir, kind, targetId, mode: image.mode, image: image.image, now, context: { name: current.name, ...garmentContext(current.garments) } });
     }
     return current;
   }
@@ -82,7 +106,6 @@ export function createPhotoFeedbackApi({ root, dataDir, env = {}, now = Date.now
     }
     const identityCount = references.length;
     for (const garment of current.garments) await add(resolvePhotoFile(dataDir, garment.image), `${garment.role} ${garment.name}; mode ${garment.mode}; garment ${garment.id}`, `${garment.id}.png`);
-    const calibration = await getPromptCalibration(dataDir);
     const modelDirection = setting("WARDROBE_MODEL_DIRECTION");
     const basePrompt = current.kind === "item"
       ? buildItemPrompt(current.item, current.mode, identityCount, modelDirection)
@@ -92,11 +115,11 @@ Preserve recognizable face, hair, skin texture and age from the face reference, 
 Wear only these exact selected garments in their recorded roles and modes. Preserve every garment's real color, texture, fit, proportions, construction, closure, graphics, logos and text. Never invent openings or fasteners. An outer layer with a real button/zip opening may be open naturally; a pullover remains closed with its inner piece visible at a real neckline, cuff or hem. Keep every selected piece identifiable. Use understated shoes only when no shoe reference was selected.
 Apply thoughtful menswear styling with an experienced menswear stylist's judgment about fit, proportion, color, texture and occasion: ${(current.outfit.occasion || []).join(", ") || "everyday"}. Keep the exact selected inner top or hoodie appropriate to the outer garment's bulk.
 Square 1:1 composition, complete head-to-shoes framing with uncropped feet, relaxed mostly front-facing pose and arms away from clothing. Setting: ${current.outfit.setting || "a quiet natural real-world setting"}. Warm natural light, realistic shadows, authentic skin and fabric, restrained editorial grading. Avoid redesigned garments, missing pieces, hidden inner layers, fake logos, extra people, text overlays, watermarks or unrealistic anatomy.`;
-    const prompt = [basePrompt, calibration.guidance ? `Calibrated styling preferences, applicable only where consistent with identity, exact selected garments, real construction, framing and user model direction: ${calibration.guidance}` : null, direction ? `User regeneration direction: ${direction}` : null].filter(Boolean).join("\n\n");
+    const prompt = [basePrompt, direction ? `User regeneration direction: ${direction}` : null].filter(Boolean).join("\n\n");
     const model = setting("OPENAI_MODELED_MODEL", setting("OPENAI_IMAGE_MODEL", "gpt-image-2"));
     return {
-      prompt, promptRevisionId: calibration.activeRevisionId,
-      context: { kind: current.kind, targetId: current.targetId, mode: current.mode, name: current.name, garmentIds: current.garments.map((piece) => piece.id), garmentModes: current.garments.map((piece) => ({ garmentId: piece.id, role: piece.role, mode: piece.mode })), references: references.map(({ data, ...reference }) => reference), model, modelDirection },
+      prompt,
+      context: { kind: current.kind, targetId: current.targetId, mode: current.mode, name: current.name, ...garmentContext(current.garments), references: references.map(({ data, ...reference }) => reference), model, modelDirection },
       request: { key, baseUrl: setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/$/, ""), model, prompt, images: references, size: current.kind === "outfit" ? "1024x1024" : "1536x1024", quality: setting("OPENAI_IMAGE_QUALITY", "high"), signal: AbortSignal.timeout(600000) },
     };
   }
@@ -125,23 +148,25 @@ Square 1:1 composition, complete head-to-shoes framing with uncropped feet, rela
       let valid = false;
       try { const dimensions = await sharp(bytes).metadata(); valid = Math.abs(dimensions.width / dimensions.height - (current.kind === "outfit" ? 1 : 1.5)) < 0.02; }
       catch { /* Invalid provider output is still archived for diagnosis. */ }
-      let unchanged = false;
-      try { unchanged = (await context(current.kind, current.targetId, current.mode, true)).signature === current.signature; }
-      catch (failure) { if (![404, 409].includes(failure.status)) throw failure; }
-      await store.transaction(async (history) => {
-        const entry = store.target(history, current.kind, current.targetId, current.mode);
-        const stillCurrent = entry.activeVersionId === baseVersionId;
-        const version = await store.archive(entry, bytes, { source: "regeneration", status: !valid ? "invalid" : unchanged && stillCurrent ? "accepted" : "rejected", prompt: pack.prompt, promptRevisionId: pack.promptRevisionId, context: pack.context });
-        store.event(entry, "generation-complete", { jobId, fromVersionId: baseVersionId, toVersionId: version.id, versionId: version.id });
-        if (entry.job?.id !== jobId) return;
-        if (!valid || !unchanged || !stillCurrent) {
-          entry.job = { ...entry.job, status: "failed", error: valid ? "The wardrobe changed during generation. The returned image was saved in history." : "The returned image has the wrong shape. Your previous photo is unchanged." };
-          return;
-        }
-        const previousVersionId = entry.activeVersionId;
-        entry.activeVersionId = version.id;
-        entry.undo = { previousVersionId, newVersionId: version.id, expiresAt: new Date(now() + UNDO_MS).toISOString() };
-        entry.job = { ...entry.job, status: "complete", completedAt: store.time(), error: null };
+      await withWardrobeLock(async () => {
+        let unchanged = false;
+        try { unchanged = (await context(current.kind, current.targetId, current.mode, true)).signature === current.signature; }
+        catch (failure) { if (![404, 409].includes(failure.status)) throw failure; }
+        await store.transaction(async (history) => {
+          const entry = store.target(history, current.kind, current.targetId, current.mode);
+          const stillCurrent = entry.activeVersionId === baseVersionId;
+          const version = await store.archive(entry, bytes, { source: "regeneration", status: !valid ? "invalid" : unchanged && stillCurrent ? "accepted" : "rejected", prompt: pack.prompt, context: pack.context });
+          store.event(entry, "generation-complete", { jobId, fromVersionId: baseVersionId, toVersionId: version.id, versionId: version.id });
+          if (entry.job?.id !== jobId) return;
+          if (!valid || !unchanged || !stillCurrent) {
+            entry.job = { ...entry.job, status: "failed", error: valid ? "The wardrobe changed during generation. The returned image was saved in history." : "The returned image has the wrong shape. Your previous photo is unchanged." };
+            return;
+          }
+          const previousVersionId = entry.activeVersionId;
+          await activate(entry, version);
+          entry.undo = { previousVersionId, newVersionId: version.id, expiresAt: new Date(now() + UNDO_MS).toISOString() };
+          entry.job = { ...entry.job, status: "complete", completedAt: store.time(), error: null };
+        });
       });
     } catch (failure) {
       await store.transaction((history) => {
@@ -162,24 +187,20 @@ Square 1:1 composition, complete head-to-shoes framing with uncropped feet, rela
     });
   }
   async function undo(kind, targetId, input) {
-    await store.transaction((history) => {
+    await withWardrobeLock(() => store.transaction(async (history) => {
       const entry = store.target(history, kind, targetId, input.mode || "default", false);
       if (!entry?.undo || entry.undo.expiresAt <= store.time() || entry.activeVersionId !== input.expectedVersionId || entry.activeVersionId !== entry.undo.newVersionId || entry.job?.status === "generating") throw error("Undo is no longer available", 409);
       const fromVersionId = entry.activeVersionId;
-      entry.activeVersionId = entry.undo.previousVersionId;
+      await activate(entry, entry.versions.find((version) => version.id === entry.undo.previousVersionId));
       entry.undo = null;
       store.event(entry, "undo", { versionId: fromVersionId, fromVersionId, toVersionId: entry.activeVersionId });
-    });
+    }));
   }
   async function listOutfits() {
     const collection = await readJson("outfits.json", { outfits: [] });
-    const results = [];
-    for (const outfit of collection.outfits || []) {
-      if (!outfit.image) continue;
-      try { const response = await photos("outfit", outfit.id); results.push({ ...outfit, image: response.photos[0]?.image || outfit.image }); }
-      catch (failure) { if (![404, 409].includes(failure.status) && failure.code !== "ENOENT") throw failure; results.push({ ...outfit, image: outfit.image.startsWith("outfit-images/") ? `/api/import/outfits/${path.basename(outfit.image)}` : outfit.image }); }
-    }
-    return results;
+    return (collection.outfits || []).filter((outfit) => outfit.image).map((outfit) => ({
+      ...outfit, image: outfit.image.startsWith("outfit-images/") ? `/api/import/outfits/${path.basename(outfit.image)}` : outfit.image,
+    }));
   }
   async function initialize() {
     await archiveExistingPhotos({ dataDir, now });
@@ -197,9 +218,7 @@ Square 1:1 composition, complete head-to-shoes framing with uncropped feet, rela
     const match = url.pathname.match(/^\/api\/import\/photos\/(item|outfit)\/([\w-]+)(?:\/(regenerate|feedback|undo))?$/);
     const asset = url.pathname.match(/^\/api\/import\/photo-history\/([a-f0-9]{64}\.png)$/);
     const oldAsset = url.pathname.match(/^\/api\/import\/outfits\/([\w-]+\.png)$/);
-    const calibration = url.pathname === "/api/import/prompt-calibration";
-    const reset = url.pathname === "/api/import/prompt-calibration/reset";
-    if (!match && !asset && !oldAsset && !calibration && !reset && url.pathname !== "/api/import/outfits") return next();
+    if (!match && !asset && !oldAsset && url.pathname !== "/api/import/outfits") return next();
     try {
       if ((asset || oldAsset) && req.method === "GET") {
         const file = asset ? path.join(store.assets, asset[1]) : path.join(dataDir, "outfit-images", oldAsset[1]);
@@ -207,14 +226,11 @@ Square 1:1 composition, complete head-to-shoes framing with uncropped feet, rela
         res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": asset ? "public, max-age=31536000, immutable" : "no-store" }); return res.end(bytes);
       }
       if (url.pathname === "/api/import/outfits" && req.method === "GET") return json(res, 200, await listOutfits());
-      if (calibration && req.method === "GET") return json(res, 200, await getPromptCalibration(dataDir));
-      if (calibration && req.method === "POST") return json(res, 200, await applyPromptCalibration(dataDir, await body(req)));
-      if (reset && req.method === "POST") return json(res, 200, await resetPromptCalibration(dataDir));
       if (match) {
         const [, kind, targetId, action] = match;
         if (!action && req.method === "GET") return json(res, 200, await photos(kind, targetId));
         if (action && req.method === "POST") {
-          const input = await body(req);
+          const input = await body(req, BODY_LIMIT);
           if (action === "regenerate") await regenerate(kind, targetId, input);
           else if (action === "feedback") await feedback(kind, targetId, input);
           else { await ensure(kind, targetId); await undo(kind, targetId, input); }
