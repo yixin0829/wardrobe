@@ -600,21 +600,21 @@ export function wardrobeImportApi(options = {}) {
     const lock = `${job.id}:${stageName}`;
     if (running.has(lock)) return running.get(lock);
     const task = (async () => {
-      const current = await withJobLock(job.id, async () => {
-        const fresh = await loadJob(job.id);
-        if (!fresh) return null;
-        fresh.metadata = await effectiveMetadata(fresh);
-        const stage = fresh.stages[stageName];
-        stage.status = "processing"; stage.decision = null; stage.error = null; stage.attempts += 1; stage.updatedAt = new Date().toISOString();
-        if (stageName === "modeled") { stage.images = []; stage.assetUrl = null; }
-        await saveJob(fresh);
-        return fresh;
-      });
-      if (!current) return;
-      const stage = current.stages[stageName];
       let failedAssetUrl = null;
       let chromaKeyUsed = null;
       try {
+        const current = await withJobLock(job.id, async () => {
+          const fresh = await loadJob(job.id);
+          if (!fresh) return null;
+          fresh.metadata = await effectiveMetadata(fresh);
+          const stage = fresh.stages[stageName];
+          stage.status = "processing"; stage.decision = null; stage.error = null; stage.attempts += 1; stage.updatedAt = new Date().toISOString();
+          if (stageName === "modeled") { stage.images = []; stage.assetUrl = null; }
+          await saveJob(fresh);
+          return fresh;
+        });
+        if (!current) return;
+        const stage = current.stages[stageName];
         const dir = path.join(jobsDir, current.id);
         const output = path.join(dir, `${stageName}-${stage.attempts}.png`);
         const key = setting("OPENAI_API_KEY");
@@ -700,8 +700,8 @@ export function wardrobeImportApi(options = {}) {
           await saveJob(fresh);
         });
       } catch (error) {
-        await withJobLock(current.id, async () => {
-          const fresh = await loadJob(current.id);
+        await withJobLock(job.id, async () => {
+          const fresh = await loadJob(job.id);
           if (!fresh) return;
           fresh.stages[stageName].status = "failed"; fresh.stages[stageName].error = error.message; fresh.stages[stageName].updatedAt = new Date().toISOString();
           if (stageName === "modeled") { fresh.stages.modeled.images = []; fresh.stages.modeled.assetUrl = null; }
@@ -710,16 +710,7 @@ export function wardrobeImportApi(options = {}) {
           await saveJob(fresh);
         });
       }
-    })().catch(async (error) => {
-      await withJobLock(job.id, async () => {
-        const fresh = await loadJob(job.id);
-        if (!fresh) return;
-        fresh.stages[stageName].status = "failed";
-        fresh.stages[stageName].error = error.message;
-        if (stageName === "modeled") { fresh.stages.modeled.images = []; fresh.stages.modeled.assetUrl = null; }
-        await saveJob(fresh);
-      });
-    }).finally(() => running.delete(lock));
+    })().catch((error) => console.error("Import job could not be saved:", error.message)).finally(() => running.delete(lock));
     running.set(lock, task);
     return task;
   }

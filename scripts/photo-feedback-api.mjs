@@ -84,8 +84,8 @@ export function createPhotoFeedbackApi({ root, dataDir, env = {}, now = Date.now
     }
     return current;
   }
-  async function photos(kind, targetId) {
-    const current = await ensure(kind, targetId);
+  async function photos(current) {
+    const { kind, targetId } = current;
     const history = await store.read();
     const modes = new Set(current.sources.map((image) => image.mode));
     return { photos: history.targets.filter((entry) => entry.kind === kind && entry.targetId === targetId && modes.has(entry.mode)).map(store.publicPhoto).filter(Boolean) };
@@ -107,6 +107,7 @@ export function createPhotoFeedbackApi({ root, dataDir, env = {}, now = Date.now
     const identityCount = references.length;
     for (const garment of current.garments) await add(resolvePhotoFile(dataDir, garment.image), `${garment.role} ${garment.name}; mode ${garment.mode}; garment ${garment.id}`, `${garment.id}.png`);
     const modelDirection = setting("WARDROBE_MODEL_DIRECTION");
+    // The outfit prompt mirrors .agents/skills/generate-outfits/references/outfit-image-prompt.md; update both together.
     const basePrompt = current.kind === "item"
       ? buildItemPrompt(current.item, current.mode, identityCount, modelDirection)
       : `Create a professional square outfit photograph of the exact person wearing the complete selected wardrobe outfit: ${current.name}.
@@ -123,9 +124,9 @@ Square 1:1 composition, complete head-to-shoes framing with uncropped feet, rela
       request: { key, baseUrl: setting("OPENAI_API_BASE_URL", "https://api.openai.com/v1").replace(/\/$/, ""), model, prompt, images: references, size: current.kind === "outfit" ? "1024x1024" : "1536x1024", quality: setting("OPENAI_IMAGE_QUALITY", "high"), signal: AbortSignal.timeout(600000) },
     };
   }
-  async function regenerate(kind, targetId, input) {
+  async function regenerate(current, input) {
+    const { kind, targetId } = current;
     const mode = input.mode || "default";
-    const current = await ensure(kind, targetId);
     if (typeof input.direction !== "undefined" && (typeof input.direction !== "string" || input.direction.length > 2000)) throw error("Direction must be at most 2000 characters");
     const direction = (input.direction || "").trim();
     const selected = await context(kind, targetId, mode, true);
@@ -228,13 +229,15 @@ Square 1:1 composition, complete head-to-shoes framing with uncropped feet, rela
       if (url.pathname === "/api/import/outfits" && req.method === "GET") return json(res, 200, await listOutfits());
       if (match) {
         const [, kind, targetId, action] = match;
-        if (!action && req.method === "GET") return json(res, 200, await photos(kind, targetId));
+        if (!action && req.method === "GET") return json(res, 200, await photos(await ensure(kind, targetId)));
         if (action && req.method === "POST") {
           const input = await body(req, BODY_LIMIT);
-          if (action === "regenerate") await regenerate(kind, targetId, input);
+          // Capture once; the action itself keeps the history current for the response.
+          const current = await ensure(kind, targetId);
+          if (action === "regenerate") await regenerate(current, input);
           else if (action === "feedback") await feedback(kind, targetId, input);
-          else { await ensure(kind, targetId); await undo(kind, targetId, input); }
-          return json(res, action === "regenerate" ? 202 : 200, await photos(kind, targetId));
+          else await undo(kind, targetId, input);
+          return json(res, action === "regenerate" ? 202 : 200, await photos(current));
         }
       }
       return json(res, 405, { error: "Method not allowed" });

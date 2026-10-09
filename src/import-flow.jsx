@@ -77,7 +77,7 @@ function ReviewEditor({ job, stage, draft, setDraft, regenPrompt, setRegenPrompt
   const isCrop = stage === "crop";
   const isGarment = stage === "garment";
   const modeledImages = getModeledImages({
-    modeledImages: job.stages.modeled?.images?.map((entry) => ({ ...entry, image: entry.image || entry.assetUrl })),
+    modeledImages: job.stages.modeled?.images,
     modeledImage: job.stages.modeled?.assetUrl,
   });
   const reviewBatch = `${job.id}:${modeledImages.map((entry) => `${entry.id}:${entry.image}`).join("|")}`;

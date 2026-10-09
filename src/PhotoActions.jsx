@@ -20,7 +20,6 @@ export function usePhotoCollection(kind, targetId) {
   const requestNumber = useRef(0);
   const loadController = useRef(null);
   const mutationPending = useRef(false);
-  const mounted = useRef(false);
   const base = `${PHOTO_API}/${kind}/${encodeURIComponent(targetId)}`;
 
   const refresh = useCallback(async () => {
@@ -31,25 +30,23 @@ export function usePhotoCollection(kind, targetId) {
     const number = ++requestNumber.current;
     try {
       const nextPhotos = await readResponse(await fetch(base, { cache: "no-store", signal: controller.signal }));
-      if (mounted.current && number === requestNumber.current) {
+      if (number === requestNumber.current) {
         setPhotos(nextPhotos);
         setError("");
       }
     } catch (requestError) {
-      if (requestError.name !== "AbortError" && mounted.current && number === requestNumber.current) setError(requestError.message);
+      if (requestError.name !== "AbortError" && number === requestNumber.current) setError(requestError.message);
     } finally {
-      if (mounted.current && number === requestNumber.current) setLoading(false);
+      if (number === requestNumber.current) setLoading(false);
     }
   }, [base]);
 
   useEffect(() => {
-    mounted.current = true;
     setPhotos([]);
     setLoading(true);
     setError("");
     refresh();
     return () => {
-      mounted.current = false;
       ++requestNumber.current;
       loadController.current?.abort();
     };
@@ -73,14 +70,14 @@ export function usePhotoCollection(kind, targetId) {
       const nextPhotos = await readResponse(await fetch(`${base}/${action}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       }));
-      if (mounted.current && number === requestNumber.current) setPhotos(nextPhotos);
+      if (number === requestNumber.current) setPhotos(nextPhotos);
       return true;
     } catch (requestError) {
-      if (mounted.current && number === requestNumber.current) setError(requestError.message);
+      if (number === requestNumber.current) setError(requestError.message);
       return false;
     } finally {
       mutationPending.current = false;
-      if (mounted.current && number === requestNumber.current) setPending(false);
+      if (number === requestNumber.current) setPending(false);
     }
   }, [base]);
 
@@ -93,6 +90,8 @@ function PhotoDialog({ title, busy, onClose, children }) {
   useEffect(() => {
     const dialog = dialogRef.current;
     dialog.showModal();
+    // showModal() focuses the first control, the close button; start in the text field instead.
+    dialog.querySelector("textarea")?.focus();
     return () => dialog.close();
   }, []);
   return (
@@ -118,20 +117,21 @@ function PhotoDialog({ title, busy, onClose, children }) {
 export function PhotoActions({ title, collection, photo, disabled = false, disabledReason = "" }) {
   const [dialog, setDialog] = useState(null);
   const [rating, setRating] = useState("up");
-  const [comment, setComment] = useState("");
-  const [direction, setDirection] = useState("");
+  const [text, setText] = useState("");
   const [now, setNow] = useState(Date.now());
-  const [savedNotice, setSavedNotice] = useState("");
+  // A notice belongs to one photo version, so Undo can announce the version it restores.
+  const [notice, setNotice] = useState(null);
   const versionId = photo?.versionId;
   const mode = photo?.mode;
   const busy = collection.pending || photo?.generating || disabled;
   const expiresAt = photo?.undo?.expiresAt ? Date.parse(photo.undo.expiresAt) : 0;
   const remaining = Math.max(0, Math.ceil((expiresAt - now) / 1000));
   const available = !!versionId && !collection.loading;
+  const isFeedback = dialog === "feedback";
 
   useEffect(() => {
     setDialog(null);
-    setSavedNotice("");
+    setNotice((current) => current?.versionId === versionId ? current : null);
     setNow(Date.now());
   }, [versionId, mode]);
   useEffect(() => {
@@ -141,31 +141,28 @@ export function PhotoActions({ title, collection, photo, disabled = false, disab
     return () => clearInterval(timer);
   }, [expiresAt]);
 
-  const openFeedback = (nextRating) => {
-    setRating(nextRating);
-    setComment(photo.feedback?.comment || "");
-    setSavedNotice("");
-    setDialog({ type: "feedback", versionId, mode });
-  };
-  const openRegeneration = () => {
-    setDirection("");
-    setSavedNotice("");
-    setDialog({ type: "regenerate", versionId, mode });
+  // The dialog closes whenever the photo version changes, so it always acts on the current one.
+  const openDialog = (type, nextRating) => {
+    if (nextRating) setRating(nextRating);
+    setText(type === "feedback" ? photo.feedback?.comment || "" : "");
+    setNotice(null);
+    setDialog(type);
   };
   const submit = async (event) => {
     event.preventDefault();
-    if (busy || !dialog || dialog.versionId !== versionId || dialog.mode !== mode) return;
-    const success = dialog.type === "feedback"
-      ? await collection.act("feedback", { versionId: dialog.versionId, rating, comment: comment.trim() })
-      : await collection.act("regenerate", { mode: dialog.mode, expectedVersionId: dialog.versionId, direction: direction.trim() });
+    if (busy) return;
+    const success = isFeedback
+      ? await collection.act("feedback", { versionId, rating, comment: text.trim() })
+      : await collection.act("regenerate", { mode, expectedVersionId: versionId, direction: text.trim() });
     if (success) {
       setDialog(null);
-      setSavedNotice(dialog.type === "feedback" ? "Feedback saved for this photo." : "Creating a new photo. You can keep browsing.");
+      setNotice({ versionId, text: isFeedback ? "Feedback saved for this photo." : "Creating a new photo. You can keep browsing." });
     }
   };
   const undo = async () => {
     if (busy || remaining <= 0) return;
-    if (await collection.act("undo", { mode, expectedVersionId: versionId })) setSavedNotice("Previous photo restored.");
+    const restoredVersionId = photo.undo.previousVersionId;
+    if (await collection.act("undo", { mode, expectedVersionId: versionId })) setNotice({ versionId: restoredVersionId, text: "Previous photo restored." });
   };
 
   return (
@@ -173,10 +170,10 @@ export function PhotoActions({ title, collection, photo, disabled = false, disab
       <div className="photo-actions__heading">
         <h2 className="photo-actions__title">{title}</h2>
         <div className="photo-actions__tools" role="group" aria-label="Photo actions">
-          <button type="button" className={photo?.feedback?.rating === "up" ? "is-selected" : ""} disabled={!available || busy} onClick={() => openFeedback("up")} aria-label="Like this photo" aria-pressed={photo?.feedback?.rating === "up"} title={disabledReason || "Like this photo"}><ThumbsUp size={15} weight={photo?.feedback?.rating === "up" ? "fill" : "regular"} aria-hidden="true" /></button>
-          <button type="button" className={photo?.feedback?.rating === "down" ? "is-selected" : ""} disabled={!available || busy} onClick={() => openFeedback("down")} aria-label="Dislike this photo" aria-pressed={photo?.feedback?.rating === "down"} title={disabledReason || "Dislike this photo"}><ThumbsDown size={15} weight={photo?.feedback?.rating === "down" ? "fill" : "regular"} aria-hidden="true" /></button>
+          <button type="button" className={photo?.feedback?.rating === "up" ? "is-selected" : ""} disabled={!available || busy} onClick={() => openDialog("feedback", "up")} aria-label="Like this photo" aria-pressed={photo?.feedback?.rating === "up"} title={disabledReason || "Like this photo"}><ThumbsUp size={15} weight={photo?.feedback?.rating === "up" ? "fill" : "regular"} aria-hidden="true" /></button>
+          <button type="button" className={photo?.feedback?.rating === "down" ? "is-selected" : ""} disabled={!available || busy} onClick={() => openDialog("feedback", "down")} aria-label="Dislike this photo" aria-pressed={photo?.feedback?.rating === "down"} title={disabledReason || "Dislike this photo"}><ThumbsDown size={15} weight={photo?.feedback?.rating === "down" ? "fill" : "regular"} aria-hidden="true" /></button>
           <span className="photo-actions__separator" aria-hidden="true" />
-          <button type="button" className={`photo-actions__regenerate${photo?.generating ? " is-generating" : ""}`} disabled={!available || busy} onClick={openRegeneration} aria-label={photo?.generating ? "Creating photo" : "Regenerate photo"} title={disabledReason || (photo?.generating ? "Creating photo…" : "Regenerate photo")}><ArrowClockwise size={15} aria-hidden="true" /></button>
+          <button type="button" className={`photo-actions__regenerate${photo?.generating ? " is-generating" : ""}`} disabled={!available || busy} onClick={() => openDialog("regenerate")} aria-label={photo?.generating ? "Creating photo" : "Regenerate photo"} title={disabledReason || (photo?.generating ? "Creating photo…" : "Regenerate photo")}><ArrowClockwise size={15} aria-hidden="true" /></button>
         </div>
       </div>
       {remaining > 0 && !photo?.generating && <div className="photo-actions__undo">
@@ -184,19 +181,19 @@ export function PhotoActions({ title, collection, photo, disabled = false, disab
         <span className="photo-actions__countdown" aria-hidden="true">{remaining}s</span>
         <span className="photo-actions__announcement" role="status">New photo ready. Undo is available for one minute.</span>
       </div>}
-      {savedNotice && <p className="photo-actions__announcement" role="status">{savedNotice}</p>}
+      {notice && notice.versionId === versionId && <p className="photo-actions__announcement" role="status">{notice.text}</p>}
       {(collection.error || photo?.error) && <div className="photo-actions__error" role="alert"><p>{collection.error || photo.error}</p>{collection.error && <button type="button" disabled={collection.pending} onClick={collection.refresh}>Try again</button>}</div>}
-      {dialog && <PhotoDialog title={dialog.type === "feedback" ? (rating === "up" ? "What works well?" : "What could be better?") : "Create a new photo"} busy={collection.pending} onClose={() => setDialog(null)}>
+      {dialog && <PhotoDialog title={isFeedback ? (rating === "up" ? "What works well?" : "What could be better?") : "Create a new photo"} busy={collection.pending} onClose={() => setDialog(null)}>
         <form onSubmit={submit}>
-          <p className="photo-dialog__intro">{dialog.type === "feedback" ? "Your feedback stays with this exact photo. Add a note to help improve future styling." : "Suggest a change, or leave this blank for another take. Your previous photo is kept, and you can undo for one minute after the new photo is ready."}</p>
+          <p className="photo-dialog__intro">{isFeedback ? "Your feedback stays with this exact photo. Add a note to help improve future styling." : "Suggest a change, or leave this blank for another take. Your previous photo is kept, and you can undo for one minute after the new photo is ready."}</p>
           <label className="field photo-dialog__field">
-            <span>{dialog.type === "feedback" ? "Comment (optional)" : "What would you like to change? (optional)"}</span>
-            <textarea autoFocus rows={4} maxLength={2000} value={dialog.type === "feedback" ? comment : direction} onChange={(event) => dialog.type === "feedback" ? setComment(event.target.value) : setDirection(event.target.value)} placeholder={dialog.type === "feedback" ? "Fit, proportions, colors, or anything else…" : "For example, use a simpler inner layer or improve the fit…"} disabled={collection.pending} />
+            <span>{isFeedback ? "Comment (optional)" : "What would you like to change? (optional)"}</span>
+            <textarea rows={4} maxLength={2000} value={text} onChange={(event) => setText(event.target.value)} placeholder={isFeedback ? "Fit, proportions, colors, or anything else…" : "For example, use a simpler inner layer or improve the fit…"} disabled={collection.pending} />
           </label>
           {collection.error && <p className="photo-actions__error" role="alert">{collection.error}</p>}
           <div className="photo-dialog__footer">
             <button type="button" className="secondary-button" disabled={collection.pending} onClick={() => setDialog(null)}>Cancel</button>
-            <button type="submit" className="primary-button" disabled={collection.pending}>{collection.pending ? (dialog.type === "feedback" ? "Saving…" : "Starting…") : dialog.type === "feedback" ? "Save feedback" : "Regenerate photo"}</button>
+            <button type="submit" className="primary-button" disabled={collection.pending}>{collection.pending ? (isFeedback ? "Saving…" : "Starting…") : isFeedback ? "Save feedback" : "Regenerate photo"}</button>
           </div>
         </form>
       </PhotoDialog>}

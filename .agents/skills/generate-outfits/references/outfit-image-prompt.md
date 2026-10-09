@@ -1,5 +1,7 @@
 # Outfit image prompt
 
+<!-- Keep in step with the outfit regeneration prompt in scripts/photo-feedback-api.mjs (generationPackage); update both together. -->
+
 Use this template with the identity reference first, then the exact wardrobe cutouts in the listed order. Delete optional clauses that do not apply. Archive each exact completed prompt as described in [the shared image-history instructions](../../../../docs/image-history-for-agents.md).
 
 ```text
@@ -7,7 +9,6 @@ Use case: identity-preserve
 Asset type: square outfit gallery photograph
 
 Image 1: identity reference for the exact person to preserve.
-[If supplied, the labeled face/body identity board uses the primary portrait for the face and the additional references for body proportions. Apply the configured user model direction: MODEL_DIRECTION.]
 Image 2: exact top garment reference.
 Image 3: exact bottom garment reference.
 [Image 4: exact outer-layer reference. Preserve its real construction and closure exactly; never invent a zipper, buttons, placket, or opening.]
@@ -19,7 +20,7 @@ Outfit: [OUTFIT NAME]
 Wearing assignments: [List the exact garment IDs, roles and modes. Default mode is the normal presentation; layer mode places the piece over the distinct selected wardrobe inner top, using its true construction and closures.]
 Scene/backdrop: [RESTRAINED REAL-WORLD SETTING].
 
-Subject: Preserve the same person's recognizable face, hair, age, build and skin texture. Use the supplied body references for proportions, subject to the explicitly configured user model direction; otherwise preserve the identity reference's body proportions. Dress them in the exact top and bottom references[ plus the exact outer-layer reference][ and the exact selected shoes/accessory] in their recorded wearing modes. Plain understated shoes and invisible basics such as socks are allowed only where needed when no shoe reference is provided. Do not add, replace, or invent any other visible clothing or accessory.
+Subject: Preserve the same person's recognizable face, hair, age, build, skin texture, and body proportions. Dress them in the exact top and bottom references[ plus the exact outer-layer reference][ and the exact selected shoes/accessory] in their recorded wearing modes. Plain understated shoes and invisible basics such as socks are allowed only where needed when no shoe reference is provided. Do not add, replace, or invent any other visible clothing or accessory.
 
 Styling: Apply the judgment of an experienced menswear stylist. Balance the selected pieces in fit, proportion, color and texture for [OCCASION]. Use the exact selected inner piece, such as a T-shirt or hoodie where its bulk suits the outer layer, and make the layered outfit fashionable and well-balanced.
 

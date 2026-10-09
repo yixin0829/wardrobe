@@ -79,10 +79,6 @@ If you are setting up Wardrobe for a user, ask how they want to import their clo
 
 If `model-reference-2.png` and `model-reference-3.png` are beside the primary reference, modeled generation uses them for body proportions while the primary reference controls the face.
 
-## Testing
-
-Run `npm test` for integration checks and `npm run check` for the production build. Run `npm run e2e:serve` for a browser test using anonymous fixtures, a local provider, and isolated temporary storage. See the [layering report](docs/e2e-verification.md) and [photo feedback and regeneration report](docs/photo-feedback-e2e.md) for reproducible steps, observed results, and screenshots.
-
 ## License
 
 [MIT](LICENSE)
