@@ -178,13 +178,14 @@ Square 1:1 composition, complete head-to-shoes framing with uncropped feet, rela
   }
   async function feedback(kind, targetId, input) {
     input.comment ??= "";
-    if (!["up", "down"].includes(input.rating) || typeof input.comment !== "string" || input.comment.length > 2000) throw error("Choose a rating and a comment of at most 2000 characters");
+    if (!["up", "down", null].includes(input.rating) || typeof input.comment !== "string" || input.comment.length > 2000) throw error("Choose a rating or clear feedback, with a comment of at most 2000 characters");
     await store.transaction((history) => {
       const entry = history.targets.find((entry) => entry.kind === kind && entry.targetId === targetId && entry.versions.some((version) => version.id === input.versionId));
       const version = entry?.versions.find((version) => version.id === input.versionId);
       if (!version) throw error("Photo version not found for this piece", 404);
-      version.feedback = { rating: input.rating, comment: input.comment.trim(), updatedAt: store.time() };
-      store.event(entry, "feedback", { versionId: version.id, rating: input.rating, comment: input.comment.trim() });
+      const comment = input.rating === null ? "" : input.comment.trim();
+      version.feedback = input.rating === null ? null : { rating: input.rating, comment, updatedAt: store.time() };
+      store.event(entry, "feedback", { versionId: version.id, rating: input.rating, comment });
     });
   }
   async function undo(kind, targetId, input) {

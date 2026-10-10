@@ -19,7 +19,7 @@ export function usePhotoCollection(kind, targetId) {
   const [error, setError] = useState("");
   const requestNumber = useRef(0);
   const loadController = useRef(null);
-  const mutationPending = useRef(false);
+  const mutationPending = useRef(null);
   const base = `${PHOTO_API}/${kind}/${encodeURIComponent(targetId)}`;
 
   const refresh = useCallback(async () => {
@@ -42,12 +42,15 @@ export function usePhotoCollection(kind, targetId) {
   }, [base]);
 
   useEffect(() => {
+    mutationPending.current = null;
+    setPending(false);
     setPhotos([]);
     setLoading(true);
     setError("");
     refresh();
     return () => {
       ++requestNumber.current;
+      mutationPending.current = null;
       loadController.current?.abort();
     };
   }, [refresh]);
@@ -61,9 +64,9 @@ export function usePhotoCollection(kind, targetId) {
 
   const act = useCallback(async (action, body) => {
     if (mutationPending.current) return false;
-    mutationPending.current = true;
     loadController.current?.abort();
     const number = ++requestNumber.current;
+    mutationPending.current = number;
     setPending(true);
     setError("");
     try {
@@ -71,13 +74,16 @@ export function usePhotoCollection(kind, targetId) {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       }));
       if (number === requestNumber.current) setPhotos(nextPhotos);
-      return true;
+      return number === requestNumber.current;
     } catch (requestError) {
       if (number === requestNumber.current) setError(requestError.message);
       return false;
     } finally {
-      mutationPending.current = false;
-      if (number === requestNumber.current) setPending(false);
+      if (mutationPending.current === number) mutationPending.current = null;
+      if (number === requestNumber.current) {
+        setPending(false);
+        setLoading(false);
+      }
     }
   }, [base]);
 
@@ -121,6 +127,7 @@ export function PhotoActions({ title, collection, photo, disabled = false, disab
   const [now, setNow] = useState(Date.now());
   // A notice belongs to one photo version, so Undo can announce the version it restores.
   const [notice, setNotice] = useState(null);
+  const feedbackPending = useRef(false);
   const versionId = photo?.versionId;
   const mode = photo?.mode;
   const busy = collection.pending || photo?.generating || disabled;
@@ -148,6 +155,20 @@ export function PhotoActions({ title, collection, photo, disabled = false, disab
     setNotice(null);
     setDialog(type);
   };
+  const giveFeedback = async (nextRating) => {
+    if (!available || busy || feedbackPending.current) return;
+    if (photo.feedback?.rating !== nextRating) {
+      openDialog("feedback", nextRating);
+      return;
+    }
+    feedbackPending.current = true;
+    setNotice(null);
+    try {
+      if (await collection.act("feedback", { versionId, rating: null, comment: "" })) {
+        setNotice({ versionId, text: "Feedback removed for this photo." });
+      }
+    } finally { feedbackPending.current = false; }
+  };
   const submit = async (event) => {
     event.preventDefault();
     if (busy) return;
@@ -170,8 +191,8 @@ export function PhotoActions({ title, collection, photo, disabled = false, disab
       <div className="photo-actions__heading">
         <h2 className="photo-actions__title">{title}</h2>
         <div className="photo-actions__tools" role="group" aria-label="Photo actions">
-          <button type="button" className={photo?.feedback?.rating === "up" ? "is-selected" : ""} disabled={!available || busy} onClick={() => openDialog("feedback", "up")} aria-label="Like this photo" aria-pressed={photo?.feedback?.rating === "up"} title={disabledReason || "Like this photo"}><ThumbsUp size={15} weight={photo?.feedback?.rating === "up" ? "fill" : "regular"} aria-hidden="true" /></button>
-          <button type="button" className={photo?.feedback?.rating === "down" ? "is-selected" : ""} disabled={!available || busy} onClick={() => openDialog("feedback", "down")} aria-label="Dislike this photo" aria-pressed={photo?.feedback?.rating === "down"} title={disabledReason || "Dislike this photo"}><ThumbsDown size={15} weight={photo?.feedback?.rating === "down" ? "fill" : "regular"} aria-hidden="true" /></button>
+          <button type="button" className={photo?.feedback?.rating === "up" ? "is-selected" : ""} disabled={!available || busy} onClick={() => giveFeedback("up")} aria-label="Like this photo" aria-pressed={photo?.feedback?.rating === "up"} title={disabledReason || "Like this photo"}><ThumbsUp size={15} weight={photo?.feedback?.rating === "up" ? "fill" : "regular"} aria-hidden="true" /></button>
+          <button type="button" className={photo?.feedback?.rating === "down" ? "is-selected" : ""} disabled={!available || busy} onClick={() => giveFeedback("down")} aria-label="Dislike this photo" aria-pressed={photo?.feedback?.rating === "down"} title={disabledReason || "Dislike this photo"}><ThumbsDown size={15} weight={photo?.feedback?.rating === "down" ? "fill" : "regular"} aria-hidden="true" /></button>
           <span className="photo-actions__separator" aria-hidden="true" />
           <button type="button" className={`photo-actions__regenerate${photo?.generating ? " is-generating" : ""}`} disabled={!available || busy} onClick={() => openDialog("regenerate")} aria-label={photo?.generating ? "Creating photo" : "Regenerate photo"} title={disabledReason || (photo?.generating ? "Creating photo…" : "Regenerate photo")}><ArrowClockwise size={15} aria-hidden="true" /></button>
         </div>

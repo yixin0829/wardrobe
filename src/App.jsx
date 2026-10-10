@@ -285,7 +285,7 @@ function ColorControl({ label, field, value, palette, onChange, sampling, setSam
   );
 }
 
-function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleStatus, disabled = false }) {
+function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleStatus, disabled = false, layeringAction, layeringNotice }) {
   const suggestedSecondary = palette.find((color) => color.toLowerCase() !== draft.color?.toLowerCase()) || "#9a9286";
 
   return (
@@ -306,7 +306,7 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
         </select>
       </label>
 
-      <LayeringControls value={draft} onChange={setDraft} disabled={disabled} />
+      <LayeringControls value={draft} onChange={setDraft} disabled={disabled} action={layeringAction} notice={layeringNotice} />
 
       <fieldset className="color-field">
         <legend>Colors</legend>
@@ -564,14 +564,20 @@ function ItemViewer({ item, onClose, onPhotoChange, onSave, onDelete, onCreateMo
           setSampling={setSampling}
           sampleStatus={sampleStatus}
           disabled={pending}
+          layeringAction={canCreateModeledLooks && defaultImage && (
+            <button className="secondary-button" type="button" disabled={pending || isDirty} onClick={createModeledLooks}>
+              {creatingModeled ? "Preparing looks…" : "Create layer look"}
+            </button>
+          )}
+          layeringNotice={canCreateModeledLooks && defaultImage && isDirty ? "Save your changes first." : null}
         />
         </fieldset>
 
-        {canCreateModeledLooks && <div className="create-modeled-look">
+        {canCreateModeledLooks && !defaultImage && <div className="create-modeled-look">
           <button className="secondary-button" type="button" disabled={pending || isDirty} onClick={createModeledLooks}>
-            {creatingModeled ? "Preparing looks…" : defaultImage ? "Create layer look" : "Create modeled looks"}
+            {creatingModeled ? "Preparing looks…" : "Create modeled looks"}
           </button>
-          <p>{isDirty ? "Save your changes first." : defaultImage ? "Add a thoughtfully styled look over a compatible inner piece." : item.canLayer ? "Create one styled look and one layered look." : "Create one styled look for this piece."}</p>
+          <p>{isDirty ? "Save your changes first." : item.canLayer ? "Create one styled look and one layered look." : "Create one styled look for this piece."}</p>
         </div>}
 
         {closeBlocked && <p className="unsaved-notice" role="status">Save or cancel changes before closing.</p>}
